@@ -14,10 +14,17 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
+
+
 dependencies = [
     "plotly>=5.0.0",
     # cadquery is intentionally left as optional — users bring their own install
 ]
+
+[project.urls]
+Repository = "https://github.com/255ribeiro/cadquery-simpleViewer"
+Documentation = "https://github.com/255ribeiro/cadquery-simpleViewer"
+"Bug Tracker" = "https://github.com/255ribeiro/cadquery-simpleViewer/issues"
 
 [project.optional-dependencies]
 cadquery = ["cadquery>=2.3.0"]
