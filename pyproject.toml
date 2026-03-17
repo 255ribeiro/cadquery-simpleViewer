@@ -1,0 +1,41 @@
+[project]
+name = "cadquery-simpleviewer"
+version = "0.1.0"
+description = "A simple interactive 3D viewer for CadQuery models using Plotly"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Fernando Ferraz Ribeiro", email = "ffribeiro@gmail.com" }
+]
+keywords = ["cadquery", "3d", "visualization", "plotly", "architecture"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "plotly>=5.0.0",
+    # cadquery is intentionally left as optional — users bring their own install
+]
+
+[project.optional-dependencies]
+cadquery = ["cadquery>=2.3.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.0.0",
+    "taskipy>=1.14.1",
+]
+
+[tool.taskipy.tasks]
+hello = "echo Hello from taskipy!"
+test = "python -m pytest"
+lint = "ruff check ."
