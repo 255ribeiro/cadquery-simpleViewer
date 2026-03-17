@@ -1,6 +1,5 @@
 # CadQuery Simple Viewer
 
-git 
 
 ## Functions
 

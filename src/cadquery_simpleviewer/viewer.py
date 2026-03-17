@@ -6,17 +6,6 @@ _DEFAULT_COLORS = [
     "sandybrown", "mediumpurple", "cadetblue", "goldenrod"
 ]
 
-_AXIS_ON = dict(
-    showbackground=True,
-    backgroundcolor="white",
-    showgrid=True,
-    gridcolor="lightgray",
-    zeroline=True,
-    showline=True,
-    showticklabels=True,
-    showspikes=True,
-)
-
 _AXIS_OFF = dict(
     showbackground=False,
     showgrid=False,
@@ -26,6 +15,29 @@ _AXIS_OFF = dict(
     showspikes=False,
     title=dict(text="")
 )
+
+
+def _padded_axis(min_val: float, max_val: float, padding_factor: float = 0.15) -> dict:
+    """
+    Build an axis dict with a padded range so geometry does not
+    touch the background planes.
+
+    padding_factor : fraction of the total span added on each side
+    """
+    span    = max_val - min_val
+    padding = span * padding_factor if span > 0 else 1.0
+
+    return dict(
+        showbackground=True,
+        backgroundcolor="white",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=True,
+        showline=True,
+        showticklabels=True,
+        showspikes=True,
+        range=[min_val - padding, max_val + padding]
+    )
 
 
 def _build_traces(objects, names, colors, opacity, tessellation_tolerance):
@@ -39,17 +51,17 @@ def _build_traces(objects, names, colors, opacity, tessellation_tolerance):
 
         vertices, triangles = objects[index].val().tessellate(tessellation_tolerance)
 
-        x   = []
-        y   = []
-        z   = []
+        x  = []
+        y  = []
+        z  = []
         for v in vertices:
             x.append(v.x)
             y.append(v.y)
             z.append(v.z)
 
-        ii  = []
-        jj  = []
-        kk  = []
+        ii = []
+        jj = []
+        kk = []
         for t in triangles:
             ii.append(t[0])
             jj.append(t[1])
@@ -72,16 +84,34 @@ def _build_traces(objects, names, colors, opacity, tessellation_tolerance):
     return traces
 
 
+def _bounding_box(traces):
+    """Return the combined x, y, z min/max across all Mesh3d traces."""
+    all_x = []
+    all_y = []
+    all_z = []
+
+    for trace in traces:
+        if isinstance(trace, go.Mesh3d):
+            all_x.extend(trace.x)
+            all_y.extend(trace.y)
+            all_z.extend(trace.z)
+
+    return (min(all_x), max(all_x),
+            min(all_y), max(all_y),
+            min(all_z), max(all_z))
+
+
 def show(
     objects,
     names=None,
     colors=None,
     opacity=1.0,
     tessellation_tolerance=0.01,
+    padding=0.15,
 ):
     """
     Display one or more CadQuery objects with full axes and grid visible.
-    Useful for inspecting dimensions and spatial relationships during modelling.
+    A padding margin is added between the geometry and the background planes.
 
     Parameters
     ----------
@@ -90,16 +120,19 @@ def show(
     colors                  : list of face colors (optional)
     opacity                 : solid opacity — 1.0 = fully opaque
     tessellation_tolerance  : mesh precision — smaller = finer, slower
+    padding                 : fraction of the bounding box span added as margin (default 0.15)
     """
     traces = _build_traces(objects, names, colors, opacity, tessellation_tolerance)
+
+    xmin, xmax, ymin, ymax, zmin, zmax = _bounding_box(traces)
 
     fig = go.Figure(data=traces)
     fig.update_layout(
         scene=dict(
             aspectmode="data",
-            xaxis=dict(**_AXIS_ON),
-            yaxis=dict(**_AXIS_ON),
-            zaxis=dict(**_AXIS_ON),
+            xaxis=dict(**_padded_axis(xmin, xmax, padding)),
+            yaxis=dict(**_padded_axis(ymin, ymax, padding)),
+            zaxis=dict(**_padded_axis(zmin, zmax, padding)),
         ),
         legend=dict(x=0, y=1),
         margin=dict(l=0, r=0, t=30, b=0)
