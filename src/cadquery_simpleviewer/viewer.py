@@ -67,7 +67,7 @@ def _build_traces(objects, names, colors, opacity, tessellation_tolerance):
             jj.append(t[1])
             kk.append(t[2])
 
-        color = colors[index] if colors else _DEFAULT_COLORS[index % len(_DEFAULT_COLORS)]
+        color = colors[index % len(colors)] if colors else _DEFAULT_COLORS[index % len(_DEFAULT_COLORS)]
         name  = names[index]  if names  else "Object " + str(index + 1)
 
         traces.append(go.Mesh3d(
