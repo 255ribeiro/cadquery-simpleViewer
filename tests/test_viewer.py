@@ -10,7 +10,6 @@ from cadquery_simpleviewer.viewer import (
     _axis_style,
     _equal_ranges,
     _expand_for_plane,
-    _geometry_center_normalized,
     show,
 )
 
@@ -72,13 +71,13 @@ def test_axes_xyz():
     assert _axes_from_string("xyz") == (True, True, True)
 
 def test_axes_x():
-    assert _axes_from_string("x") == (True, False, False)
+    assert _axes_from_string("x")  == (True, False, False)
 
 def test_axes_y():
-    assert _axes_from_string("y") == (False, True, False)
+    assert _axes_from_string("y")  == (False, True, False)
 
 def test_axes_z():
-    assert _axes_from_string("z") == (False, False, True)
+    assert _axes_from_string("z")  == (False, False, True)
 
 def test_axes_xy():
     assert _axes_from_string("xy") == (True, True, False)
@@ -139,72 +138,22 @@ def test_plane_size_respected_in_figure(box):
     assert x_span >= 200
 
 
-# ── _geometry_center_normalized ──────────────────────────────────────────────
-
-def test_geometry_center_normalized_at_center_of_range():
-    """
-    When geometry fills the full range, the normalized center must be 0,0,0.
-    """
-    geom_bbox  = (-5, 5, -5, 5, -5, 5)
-    final_ranges = ([-5, 5], [-5, 5], [-5, 5])
-    center = _geometry_center_normalized(geom_bbox, final_ranges)
-    assert abs(center["x"]) < 1e-9
-    assert abs(center["y"]) < 1e-9
-    assert abs(center["z"]) < 1e-9
-
-
-def test_geometry_center_normalized_offset():
-    """
-    When geometry is at the bottom of an expanded range (e.g. plane added),
-    the normalized center must be negative (below scene center).
-    """
-    # Geometry goes from 0 to 2 in z, but range expanded to -10..10 for plane
-    geom_bbox   = (-1, 1, -1, 1, 0, 2)
-    final_ranges = ([-10, 10], [-10, 10], [-10, 10])
-    center = _geometry_center_normalized(geom_bbox, final_ranges)
-    # geom z center = 1.0, range = -10..10, normalized = 2*(1-(-10))/20 - 1 = 0.1
-    assert abs(center["z"] - 0.1) < 1e-9
-
-
-def test_camera_center_looks_at_geometry_not_plane(box):
-    """
-    With a large base plane, the camera center z coordinate must be > 0
-    (pointing above the plane, at the geometry), not at scene center z=0.
-    """
-    fig = _capture_fig(box, z=-20, plane_size=200)
-    cz = fig.layout.scene.camera.center.z
-    # Scene is expanded downward for the plane, so geometry center is above
-    # the scene midpoint — camera.center.z must be positive
-    assert cz > 0
-
-
-def test_camera_buttons_point_at_geometry(box):
-    """Every camera button must include a center that points at the geometry."""
-    fig = _capture_fig(box, z=-10, plane_size=100)
-    for button in fig.layout.updatemenus[3].buttons:
-        cam = button.args[0]["scene.camera"]
-        assert "center" in cam
-
-
 # ── _build_traces ────────────────────────────────────────────────────────────
 
 def test_build_traces_single(box):
     traces = _build_traces(box, None, None, 1.0, 0.1)
-    assert len(traces) == 1
-    assert isinstance(traces[0], go.Mesh3d)
+    assert len(traces) == 1 and isinstance(traces[0], go.Mesh3d)
 
 def test_build_traces_list(two_objects):
     assert len(_build_traces(two_objects, None, None, 1.0, 0.1)) == 2
 
 def test_build_traces_names(two_objects):
     traces = _build_traces(two_objects, ["Box", "Cylinder"], None, 1.0, 0.1)
-    assert traces[0].name == "Box"
-    assert traces[1].name == "Cylinder"
+    assert traces[0].name == "Box" and traces[1].name == "Cylinder"
 
 def test_build_traces_default_names(two_objects):
     traces = _build_traces(two_objects, None, None, 1.0, 0.1)
-    assert traces[0].name == "Object 1"
-    assert traces[1].name == "Object 2"
+    assert traces[0].name == "Object 1" and traces[1].name == "Object 2"
 
 def test_build_traces_color(box):
     assert _build_traces(box, None, ["red"], 1.0, 0.1)[0].color == "red"
@@ -213,8 +162,8 @@ def test_build_traces_opacity(box):
     assert _build_traces(box, None, None, 0.5, 0.1)[0].opacity == 0.5
 
 def test_build_traces_geometry(box):
-    trace = _build_traces(box, None, None, 1.0, 0.1)[0]
-    assert len(trace.x) > 0 and len(trace.i) > 0
+    t = _build_traces(box, None, None, 1.0, 0.1)[0]
+    assert len(t.x) > 0 and len(t.i) > 0
 
 
 # ── _bounding_box ────────────────────────────────────────────────────────────
@@ -230,7 +179,7 @@ def test_bounding_box_ignores_plane():
     obj = cq.Workplane("XY").box(2, 2, 2)
     traces = _build_traces(obj, None, None, 1.0, 0.1)
     traces.insert(0, plane)
-    xmin, xmax, _, _, _, _ = _bounding_box(traces)
+    _, xmax, _, _, _, _ = _bounding_box(traces)
     assert xmax < 10
 
 
@@ -297,7 +246,7 @@ def test_axis_menus_are_buttons(box):
     for i in range(3):
         assert fig.layout.updatemenus[i].type == "buttons"
 
-def test_camera_menu_is_dropdown(box):
+def test_camera_is_dropdown(box):
     assert _capture_fig(box).layout.updatemenus[3].type == "dropdown"
 
 def test_axis_toggles_two_buttons(box):
@@ -327,12 +276,12 @@ def test_axis_off_hollow_symbol(box):
 # ── show — camera restores aspect ────────────────────────────────────────────
 
 def test_camera_buttons_restore_aspectmode(box):
-    for button in _capture_fig(box).layout.updatemenus[3].buttons:
-        assert button.args[0].get("scene.aspectmode") == "manual"
+    for b in _capture_fig(box).layout.updatemenus[3].buttons:
+        assert b.args[0].get("scene.aspectmode") == "manual"
 
 def test_camera_buttons_restore_aspectratio(box):
-    for button in _capture_fig(box).layout.updatemenus[3].buttons:
-        ratio = button.args[0].get("scene.aspectratio", {})
+    for b in _capture_fig(box).layout.updatemenus[3].buttons:
+        ratio = b.args[0].get("scene.aspectratio", {})
         assert ratio.get("x") == 1
         assert ratio.get("y") == 1
         assert ratio.get("z") == 1

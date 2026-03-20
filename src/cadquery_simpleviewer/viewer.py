@@ -182,7 +182,7 @@ def _expand_for_plane(x_range, y_range, z_range, plane_size, z_level):
     x_span = new_x[1] - new_x[0]
     y_span = new_y[1] - new_y[0]
     z_span = new_z[1] - new_z[0]
-    half = max(x_span, y_span, z_span) / 2
+    half   = max(x_span, y_span, z_span) / 2
 
     xc = (new_x[0] + new_x[1]) / 2
     yc = (new_y[0] + new_y[1]) / 2
@@ -192,38 +192,6 @@ def _expand_for_plane(x_range, y_range, z_range, plane_size, z_level):
         [xc - half, xc + half],
         [yc - half, yc + half],
         [zc - half, zc + half],
-    )
-
-
-def _geometry_center_normalized(geom_bbox, final_ranges):
-    """
-    Convert the geometry center from data coordinates to Plotly's normalized
-    scene coordinates [-1, 1].
-
-    Plotly maps the full axis range [min, max] to [-1, 1] internally.
-    The camera 'center' parameter uses this normalized space, so to look at
-    the geometry center (rather than the scene center which may be shifted
-    by the base plane expansion) we must convert:
-
-        normalized = 2 * (data_value - range_min) / (range_max - range_min) - 1
-    """
-    xmin, xmax, ymin, ymax, zmin, zmax = geom_bbox
-    x_range, y_range, z_range = final_ranges
-
-    geom_cx = (xmin + xmax) / 2
-    geom_cy = (ymin + ymax) / 2
-    geom_cz = (zmin + zmax) / 2
-
-    def normalize(value, rng):
-        span = rng[1] - rng[0]
-        if span == 0:
-            return 0.0
-        return 2.0 * (value - rng[0]) / span - 1.0
-
-    return dict(
-        x=normalize(geom_cx, x_range),
-        y=normalize(geom_cy, y_range),
-        z=normalize(geom_cz, z_range),
     )
 
 
@@ -269,17 +237,16 @@ def _make_axis_toggle(label, scene_key, initial_visible, val_range, x_pos):
     )
 
 
-def _make_camera_menu(x_pos, camera_center):
+def _make_camera_menu(x_pos):
     """
     Build a two-option dropdown: Perspective and Orthographic.
-
-    camera_center is passed in normalized scene coordinates so that every
-    camera preset keeps looking at the geometry center, not the scene center
-    (which may be shifted by the base plane expansion).
 
     Every button also relayouts aspectmode='manual' and aspectratio=1:1:1
     because a Plotly relayout that sets only scene.camera silently resets
     aspectmode to 'auto', destroying the equal-scale setup.
+
+    Orthographic uses a larger eye vector (2.5, 2.5, 2.5) to give Plotly's
+    near/far clipping planes enough margin to include the geometry.
     """
     shared = {
         "scene.aspectmode":  "manual",
@@ -291,7 +258,6 @@ def _make_camera_menu(x_pos, camera_center):
         args["scene.camera"] = dict(
             projection=dict(type=projection_type),
             eye=dict(x=ex, y=ey, z=ez),
-            center=camera_center,
             up=dict(x=0, y=0, z=1)
         )
         return [args]
@@ -341,8 +307,6 @@ def show(
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
-    When a base plane is used, the initial camera looks at the geometry,
-    not the plane.
 
     Parameters
     ----------
@@ -371,30 +335,20 @@ def show(
             z=z
         ))
 
-    # Bounding box from geometry only — used to center the camera
-    geom_bbox = _bounding_box(traces)
-    xmin, xmax, ymin, ymax, zmin, zmax = geom_bbox
-
-    # Initial ranges from geometry + padding
+    xmin, xmax, ymin, ymax, zmin, zmax = _bounding_box(traces)
     x_range, y_range, z_range = _equal_ranges(
         xmin, xmax, ymin, ymax, zmin, zmax, padding
     )
 
-    # Expand ranges to include the base plane so it is never clipped
     if z is not None:
         x_range, y_range, z_range = _expand_for_plane(
             x_range, y_range, z_range, plane_size, z
         )
 
-    # Camera center in normalized scene coordinates pointing at geometry center
-    camera_center = _geometry_center_normalized(
-        geom_bbox, (x_range, y_range, z_range)
-    )
-
     menu_x   = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
     menu_y   = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
     menu_z   = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
-    menu_cam = _make_camera_menu(x_pos=0.56, camera_center=camera_center)
+    menu_cam = _make_camera_menu(x_pos=0.56)
 
     annotations = [
         dict(text="Axes:", x=-0.01, y=1.17, xref="paper", yref="paper",
@@ -414,7 +368,6 @@ def show(
             camera=dict(
                 projection=dict(type="perspective"),
                 eye=dict(x=1.5, y=1.5, z=1.5),
-                center=camera_center,
                 up=dict(x=0, y=0, z=1)
             )
         ),
