@@ -1,3 +1,4 @@
+import cadquery as cq
 import plotly.graph_objects as go
 from .plane import _base_plane
 
@@ -6,9 +7,35 @@ _DEFAULT_COLORS = [
     "sandybrown", "mediumpurple", "cadetblue", "goldenrod"
 ]
 
+_DEFAULT_POINTS_DISPLAY = dict(
+    size=5,
+    color="red",
+    symbol="circle",
+    opacity=1.0,
+)
+
 _VALID_AXES = {None, "x", "y", "z", "xy", "xz", "yz", "xyz"}
 
 _EQUAL_ASPECT = dict(x=1, y=1, z=1)
+
+
+def _is_point(obj):
+    """
+    Return True if obj is a cq.Vector or a list/tuple of exactly 3 numbers.
+    These are rendered as Scatter3d markers instead of tessellated meshes.
+    """
+    if isinstance(obj, cq.occ_impl.geom.Vector):
+        return True
+    if isinstance(obj, (list, tuple)) and len(obj) == 3:
+        return all(isinstance(v, (int, float)) for v in obj)
+    return False
+
+
+def _point_to_xyz(obj):
+    """Extract (x, y, z) from a cq.Vector or a [x, y, z] list/tuple."""
+    if isinstance(obj, cq.occ_impl.geom.Vector):
+        return obj.x, obj.y, obj.z
+    return float(obj[0]), float(obj[1]), float(obj[2])
 
 
 def _axis_style(visible: bool) -> dict:
@@ -65,65 +92,98 @@ def _axes_from_string(visible_axes):
     return "x" in key, "y" in key, "z" in key
 
 
-def _build_traces(objects, names, colors, opacity, tessellation_tolerance):
-    """Tessellate a list of CadQuery objects into Plotly Mesh3d traces."""
+def _build_traces(objects, names, colors, opacity,
+                  tessellation_tolerance, points_display):
+    """
+    Build Plotly traces from a mixed list of CadQuery objects and point objects.
+
+    CadQuery Workplane objects → go.Mesh3d (tessellated)
+    cq.Vector or [x, y, z]   → go.Scatter3d (markers only)
+
+    Returns (traces, all_x, all_y, all_z) where the coordinate lists cover
+    all objects for bounding box computation.
+    """
     if not isinstance(objects, list):
         objects = [objects]
 
-    traces = []
+    # Merge caller's points_display with defaults (caller wins)
+    marker_style = dict(_DEFAULT_POINTS_DISPLAY)
+    if points_display is not None:
+        marker_style.update(points_display)
+
+    traces  = []
+    all_x   = []
+    all_y   = []
+    all_z   = []
+
+    mesh_color_index = 0
 
     for index in range(len(objects)):
+        obj  = objects[index]
+        name = names[index] if names else "Object " + str(index + 1)
 
-        vertices, triangles = objects[index].val().tessellate(tessellation_tolerance)
+        if _is_point(obj):
+            # --- Point object → Scatter3d marker ---
+            px, py, pz = _point_to_xyz(obj)
+            all_x.append(px)
+            all_y.append(py)
+            all_z.append(pz)
 
-        x  = []
-        y  = []
-        z  = []
-        for v in vertices:
-            x.append(v.x)
-            y.append(v.y)
-            z.append(v.z)
+            traces.append(go.Scatter3d(
+                x=[px], y=[py], z=[pz],
+                mode="markers",
+                marker=dict(
+                    size=marker_style.get("size", 5),
+                    color=marker_style.get("color", "red"),
+                    symbol=marker_style.get("symbol", "circle"),
+                    opacity=marker_style.get("opacity", 1.0),
+                ),
+                name=name,
+                showlegend=True,
+            ))
 
-        ii = []
-        jj = []
-        kk = []
-        for t in triangles:
-            ii.append(t[0])
-            jj.append(t[1])
-            kk.append(t[2])
+        else:
+            # --- CadQuery object → tessellated Mesh3d ---
+            vertices, triangles = obj.val().tessellate(tessellation_tolerance)
 
-        color = colors[index] if colors else _DEFAULT_COLORS[index % len(_DEFAULT_COLORS)]
-        name  = names[index]  if names  else "Object " + str(index + 1)
+            x  = []
+            y  = []
+            z  = []
+            for v in vertices:
+                x.append(v.x)
+                y.append(v.y)
+                z.append(v.z)
 
-        traces.append(go.Mesh3d(
-            x=x, y=y, z=z,
-            i=ii, j=jj, k=kk,
-            color=color,
-            opacity=opacity,
-            name=name,
-            flatshading=True,
-            showlegend=True,
-            lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
-        ))
+            ii = []
+            jj = []
+            kk = []
+            for t in triangles:
+                ii.append(t[0])
+                jj.append(t[1])
+                kk.append(t[2])
 
-    return traces
+            all_x.extend(x)
+            all_y.extend(y)
+            all_z.extend(z)
 
+            if colors:
+                color = colors[index]
+            else:
+                color = _DEFAULT_COLORS[mesh_color_index % len(_DEFAULT_COLORS)]
+                mesh_color_index += 1
 
-def _bounding_box(traces):
-    """Return combined x, y, z min/max across geometry traces only (showlegend=True)."""
-    all_x = []
-    all_y = []
-    all_z = []
+            traces.append(go.Mesh3d(
+                x=x, y=y, z=z,
+                i=ii, j=jj, k=kk,
+                color=color,
+                opacity=opacity,
+                name=name,
+                flatshading=True,
+                showlegend=True,
+                lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
+            ))
 
-    for trace in traces:
-        if isinstance(trace, go.Mesh3d) and trace.showlegend:
-            all_x.extend(trace.x)
-            all_y.extend(trace.y)
-            all_z.extend(trace.z)
-
-    return (min(all_x), max(all_x),
-            min(all_y), max(all_y),
-            min(all_z), max(all_z))
+    return traces, all_x, all_y, all_z
 
 
 def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
@@ -134,9 +194,6 @@ def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
       1. aspectmode='manual'
       2. aspectratio=dict(x=1, y=1, z=1)
       3. Equal data ranges on all three axes
-
-    aspectmode='data' alone does NOT give equal scale — it draws each axis
-    proportional to its own data range, so a thin model looks squashed.
     """
     x_center = (xmin + xmax) / 2
     y_center = (ymin + ymax) / 2
@@ -147,6 +204,8 @@ def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
     z_span = zmax - zmin
 
     half = max(x_span, y_span, z_span) / 2 * (1 + padding)
+    # Ensure a minimum half-span so single points don't collapse to zero range
+    half = max(half, 1.0)
 
     return (
         [x_center - half, x_center + half],
@@ -157,13 +216,8 @@ def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
 
 def _expand_for_plane(x_range, y_range, z_range, plane_size, z_level):
     """
-    Expand the axis ranges to include the base plane extents.
-
-    With aspectmode='manual' and explicit ranges, Plotly clips all geometry
-    outside those ranges — including the base plane. If plane_size is larger
-    than the geometry bounding box the plane would be clipped and appear
-    smaller than requested. This function expands x/y to fit plane_size and
-    z to include z_level, then re-equalises the three spans.
+    Expand the axis ranges to include the base plane extents so it is
+    never clipped by the explicit axis ranges.
     """
     x_center = (x_range[0] + x_range[1]) / 2
     y_center = (y_range[0] + y_range[1]) / 2
@@ -178,7 +232,6 @@ def _expand_for_plane(x_range, y_range, z_range, plane_size, z_level):
     new_y = [y_center - half_xy, y_center + half_xy]
     new_z = [min(z_range[0], z_level), max(z_range[1], z_level)]
 
-    # Re-equalise: all three ranges must have the same span
     x_span = new_x[1] - new_x[0]
     y_span = new_y[1] - new_y[0]
     z_span = new_z[1] - new_z[0]
@@ -244,9 +297,6 @@ def _make_camera_menu(x_pos):
     Every button also relayouts aspectmode='manual' and aspectratio=1:1:1
     because a Plotly relayout that sets only scene.camera silently resets
     aspectmode to 'auto', destroying the equal-scale setup.
-
-    Orthographic uses a larger eye vector (2.5, 2.5, 2.5) to give Plotly's
-    near/far clipping planes enough margin to include the geometry.
     """
     shared = {
         "scene.aspectmode":  "manual",
@@ -301,19 +351,26 @@ def show(
     plane_opacity=0.8,
     tessellation_tolerance=0.01,
     padding=0.15,
+    points_display=None,
 ):
     """
     Display one or more CadQuery objects as an interactive 3D Plotly figure.
+
+    Accepts a mixed list of CadQuery Workplane objects, cq.Vector points,
+    and [x, y, z] lists. Workplane objects are tessellated into meshes;
+    points are rendered as Scatter3d markers.
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
 
     Parameters
     ----------
-    objects                 : single CadQuery object or list of CadQuery objects
+    objects                 : object or list — CadQuery Workplane, cq.Vector,
+                              or [x, y, z] list, or any mix of these
     names                   : list of legend labels (optional)
-    colors                  : list of face colors — see https://plotly.com/python/css-colors/
-    opacity                 : solid opacity — 1.0 = fully opaque
+    colors                  : list of face colors for mesh objects —
+                              see https://plotly.com/python/css-colors/
+    opacity                 : solid opacity for mesh objects — 1.0 = fully opaque
     visible_axes            : initial axes visibility —
                               None = no axes, "x"/"y"/"z"/"xy"/"xz"/"yz"/"xyz" (default)
     z                       : elevation of the base plane; None = no plane (default)
@@ -322,10 +379,20 @@ def show(
     plane_opacity           : opacity of the base plane
     tessellation_tolerance  : mesh precision — smaller = finer, slower
     padding                 : fraction of bounding box span added as axis margin
+    points_display          : dict to configure point markers. Keys (all optional):
+                                size    — marker size in pixels (default 5)
+                                color   — marker color (default "red")
+                                symbol  — marker shape (default "circle")
+                                         other options: "square", "diamond",
+                                         "cross", "x", "circle-open"
+                                opacity — marker opacity (default 1.0)
     """
     show_x, show_y, show_z = _axes_from_string(visible_axes)
 
-    traces = _build_traces(objects, names, colors, opacity, tessellation_tolerance)
+    traces, all_x, all_y, all_z = _build_traces(
+        objects, names, colors, opacity,
+        tessellation_tolerance, points_display
+    )
 
     if z is not None:
         traces.insert(0, _base_plane(
@@ -335,7 +402,10 @@ def show(
             z=z
         ))
 
-    xmin, xmax, ymin, ymax, zmin, zmax = _bounding_box(traces)
+    xmin, xmax = min(all_x), max(all_x)
+    ymin, ymax = min(all_y), max(all_y)
+    zmin, zmax = min(all_z), max(all_z)
+
     x_range, y_range, z_range = _equal_ranges(
         xmin, xmax, ymin, ymax, zmin, zmax, padding
     )

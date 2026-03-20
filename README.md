@@ -7,6 +7,7 @@ An interactive 3D viewer for [CadQuery](https://github.com/CadQuery/cadquery) mo
 ## Features
 
 - Interactive orbit, zoom and pan inside the notebook cell
+- Supports CadQuery solids, `cq.Vector` points, and `[x, y, z]` lists — mixed in the same call
 - Axes visibility toggles (X, Y, Z independently)
 - Camera mode selector (Perspective / Orthographic)
 - Optional ground plane at a chosen elevation
@@ -80,7 +81,7 @@ show(
 )
 ```
 
-### Clean architectural presentation (axes hidden)
+### Clean presentation (axes hidden)
 
 ```python
 show(
@@ -95,13 +96,86 @@ show(
 
 ---
 
+## Displaying Points
+
+`show()` accepts `cq.Vector` objects and `[x, y, z]` lists alongside CadQuery solids. Points are rendered as `Scatter3d` markers — no tessellation involved.
+
+### Single point
+
+```python
+show(cq.Vector(2.5, 0, 1))
+```
+
+### List notation
+
+```python
+show([2.5, 0, 1])
+```
+
+### Mixed solids and points
+
+```python
+box    = cq.Workplane("XY").box(5, 3, 2)
+corner = cq.Vector(2.5, 1.5, 1.0)
+
+show(
+    [box, corner],
+    names=["Box", "Corner"]
+)
+```
+
+### Multiple points from edge division
+
+```python
+def divide_edge(edge, n):
+    points = []
+    for i in range(n + 1):
+        t = i / n
+        points.append(edge.positionAt(t))
+    return points
+
+edge   = cq.Edge.makeLine(cq.Vector(-5, 0, 0), cq.Vector(5, 0, 0))
+points = divide_edge(edge, 8)
+
+show(points, names=["P" + str(i) for i in range(len(points))])
+```
+
+### Customising point appearance
+
+Pass a `points_display` dict to control the marker style. All keys are optional — unspecified keys fall back to the defaults.
+
+```python
+show(
+    [box] + points,
+    points_display=dict(
+        size=8,
+        color="blue",
+        symbol="diamond",
+        opacity=0.9
+    )
+)
+```
+
+| `points_display` key | Default | Options |
+|----------------------|---------|---------|
+| `size` | `5` | Any integer (pixels) |
+| `color` | `"red"` | Any CSS color name or hex — see [Plotly CSS colors](https://plotly.com/python/css-colors/) |
+| `symbol` | `"circle"` | `"circle"`, `"circle-open"`, `"square"`, `"diamond"`, `"cross"`, `"x"` |
+| `opacity` | `1.0` | `0.0` – `1.0` |
+
+> Note: `points_display` applies the same style to all point objects in the call. To display points with different colors, make separate `show()` calls or use `go.Scatter3d` directly.
+
+---
+
 ## Google Colab
 
 Install at the top of the notebook, then use normally:
 
 ```python
-
-!pip install cadquery cadquery-simpleviewer
+import sys
+IN_COLAB = "google.colab" in sys.modules
+if IN_COLAB:
+    !pip install cadquery cadquery-simpleviewer
 
 import cadquery as cq
 from cadquery_simpleviewer import show
@@ -129,6 +203,7 @@ show(
     plane_opacity=0.8,
     tessellation_tolerance=0.01,
     padding=0.15,
+    points_display=None,
 )
 ```
 
@@ -136,17 +211,18 @@ show(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `objects` | object or list | — | Single CadQuery `Workplane` object or a list of them |
+| `objects` | object or list | — | CadQuery `Workplane`, `cq.Vector`, `[x, y, z]` list, or any mix of these |
 | `names` | list of str | `None` | Legend label for each object. Defaults to `"Object 1"`, `"Object 2"`, … |
-| `colors` | list of str | `None` | Face color for each object. Accepts CSS color names and hex values. See [Plotly CSS colors](https://plotly.com/python/css-colors/) for the full list. Defaults to a built-in palette |
-| `opacity` | float | `1.0` | Surface opacity applied to all objects. `1.0` = fully opaque, `0.0` = fully transparent |
-| `visible_axes` | str or None | `"xyz"` | Initial axes visibility. `None` hides all axes. Any combination of `"x"`, `"y"`, `"z"` shows only those axes. Valid values: `None`, `"x"`, `"y"`, `"z"`, `"xy"`, `"xz"`, `"yz"`, `"xyz"` |
-| `z` | float or None | `None` | Elevation of the ground plane. When `None` no plane is drawn |
+| `colors` | list of str | `None` | Face color for each mesh object. Accepts CSS color names and hex values. See [Plotly CSS colors](https://plotly.com/python/css-colors/). Defaults to a built-in palette |
+| `opacity` | float | `1.0` | Surface opacity for mesh objects. `1.0` = fully opaque, `0.0` = fully transparent |
+| `visible_axes` | str or None | `"xyz"` | Initial axes visibility. `None` hides all axes. Valid values: `None`, `"x"`, `"y"`, `"z"`, `"xy"`, `"xz"`, `"yz"`, `"xyz"` |
+| `z` | float or None | `None` | Elevation of the ground plane. `None` = no plane drawn |
 | `plane_color` | str | `"whitesmoke"` | Color of the ground plane |
 | `plane_size` | float | `50` | Half-side length of the ground plane quad. The plane extends `±plane_size` from the scene center in X and Y |
 | `plane_opacity` | float | `0.8` | Opacity of the ground plane |
-| `tessellation_tolerance` | float | `0.01` | Mesh precision used when converting the BREP solid to triangles. Smaller values produce a finer mesh but are slower |
-| `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis. `0.15` = 15% padding on each side |
+| `tessellation_tolerance` | float | `0.01` | Mesh precision for BREP→triangle conversion. Smaller = finer mesh, slower |
+| `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis |
+| `points_display` | dict or None | `None` | Marker style for point objects. See keys in the table above. `None` uses defaults |
 
 ### Interactive controls
 
