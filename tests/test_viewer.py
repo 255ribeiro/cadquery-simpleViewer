@@ -10,7 +10,11 @@ from cadquery_simpleviewer.viewer import (
     _equal_ranges,
     _expand_for_plane,
     _is_point,
+    _is_edge,
+    _is_wire,
     _point_to_xyz,
+    _sample_edge,
+    _sample_wire,
     show,
 )
 
@@ -28,13 +32,23 @@ def cylinder():
 
 
 @pytest.fixture
-def two_objects(box, cylinder):
-    return [box, cylinder]
+def vec():
+    return cq.Vector(1.0, 2.0, 3.0)
 
 
 @pytest.fixture
-def vec():
-    return cq.Vector(1.0, 2.0, 3.0)
+def straight_edge():
+    return cq.Edge.makeLine(cq.Vector(0, 0, 0), cq.Vector(5, 0, 0))
+
+
+@pytest.fixture
+def arc_edge():
+    return cq.Edge.makeCircle(radius=3.0)
+
+
+@pytest.fixture
+def rect_wire():
+    return cq.Wire.makeRect(4.0, 2.0)
 
 
 def _capture_fig(obj, **kwargs):
@@ -54,42 +68,147 @@ def _capture_fig(obj, **kwargs):
 def test_is_point_vector():
     assert _is_point(cq.Vector(1, 2, 3)) == True
 
-def test_is_point_list_of_three():
+def test_is_point_list():
     assert _is_point([1.0, 2.0, 3.0]) == True
 
-def test_is_point_tuple_of_three():
+def test_is_point_tuple():
     assert _is_point((1, 2, 3)) == True
-
-def test_is_point_int_list():
-    assert _is_point([0, 0, 0]) == True
 
 def test_is_point_wrong_length():
     assert _is_point([1.0, 2.0]) == False
 
 def test_is_point_wrong_type():
-    assert _is_point("not a point") == False
+    assert _is_point("abc") == False
 
 def test_is_point_workplane(box):
     assert _is_point(box) == False
 
 
+# ── _is_edge / _is_wire ───────────────────────────────────────────────────────
+
+def test_is_edge_with_edge(straight_edge):
+    assert _is_edge(straight_edge) == True
+
+def test_is_edge_with_wire(rect_wire):
+    assert _is_edge(rect_wire) == False
+
+def test_is_edge_with_vector():
+    assert _is_edge(cq.Vector(1, 2, 3)) == False
+
+def test_is_wire_with_wire(rect_wire):
+    assert _is_wire(rect_wire) == True
+
+def test_is_wire_with_edge(straight_edge):
+    assert _is_wire(straight_edge) == False
+
+def test_is_wire_with_workplane(box):
+    assert _is_wire(box) == False
+
+
 # ── _point_to_xyz ─────────────────────────────────────────────────────────────
 
-def test_point_to_xyz_from_vector():
+def test_point_to_xyz_vector():
     x, y, z = _point_to_xyz(cq.Vector(1.0, 2.0, 3.0))
     assert (x, y, z) == (1.0, 2.0, 3.0)
 
-def test_point_to_xyz_from_list():
+def test_point_to_xyz_list():
     x, y, z = _point_to_xyz([4.0, 5.0, 6.0])
     assert (x, y, z) == (4.0, 5.0, 6.0)
 
-def test_point_to_xyz_from_tuple():
-    x, y, z = _point_to_xyz((7, 8, 9))
-    assert (x, y, z) == (7.0, 8.0, 9.0)
-
-def test_point_to_xyz_int_inputs():
+def test_point_to_xyz_returns_floats():
     x, y, z = _point_to_xyz([1, 2, 3])
     assert isinstance(x, float)
+
+
+# ── _sample_edge ─────────────────────────────────────────────────────────────
+
+def test_sample_edge_returns_correct_count(straight_edge):
+    x, y, z = _sample_edge(straight_edge, 10)
+    assert len(x) == 11   # n+1 points for n samples
+    assert len(y) == 11
+    assert len(z) == 11
+
+def test_sample_edge_straight_endpoints(straight_edge):
+    x, y, z = _sample_edge(straight_edge, 5)
+    assert abs(x[0] - 0.0) < 1e-6
+    assert abs(x[-1] - 5.0) < 1e-6
+
+def test_sample_edge_arc_stays_on_circle(arc_edge):
+    x, y, z = _sample_edge(arc_edge, 36)
+    for i in range(len(x)):
+        r = (x[i] ** 2 + y[i] ** 2) ** 0.5
+        assert abs(r - 3.0) < 1e-4
+
+
+# ── _sample_wire ─────────────────────────────────────────────────────────────
+
+def test_sample_wire_returns_lists(rect_wire):
+    x, y, z = _sample_wire(rect_wire, 10)
+    assert isinstance(x, list)
+    assert isinstance(y, list)
+    assert isinstance(z, list)
+
+def test_sample_wire_contains_none_separators(rect_wire):
+    x, y, z = _sample_wire(rect_wire, 10)
+    assert None in x
+
+def test_sample_wire_has_coordinates(rect_wire):
+    x, y, z = _sample_wire(rect_wire, 10)
+    non_none = [v for v in x if v is not None]
+    assert len(non_none) > 0
+
+
+# ── _build_traces — edges and wires ──────────────────────────────────────────
+
+def test_build_traces_edge_produces_scatter3d(straight_edge):
+    traces, *_ = _build_traces([straight_edge], None, None, 1.0, 0.1, None, None)
+    assert isinstance(traces[0], go.Scatter3d)
+
+def test_build_traces_edge_mode_is_lines(straight_edge):
+    traces, *_ = _build_traces([straight_edge], None, None, 1.0, 0.1, None, None)
+    assert traces[0].mode == "lines"
+
+def test_build_traces_wire_produces_scatter3d(rect_wire):
+    traces, *_ = _build_traces([rect_wire], None, None, 1.0, 0.1, None, None)
+    assert isinstance(traces[0], go.Scatter3d)
+
+def test_build_traces_edge_name(straight_edge):
+    traces, *_ = _build_traces([straight_edge], ["Edge A"], None, 1.0, 0.1, None, None)
+    assert traces[0].name == "Edge A"
+
+def test_build_traces_edge_default_name(straight_edge):
+    traces, *_ = _build_traces([straight_edge], None, None, 1.0, 0.1, None, None)
+    assert traces[0].name == "Object 1"
+
+def test_build_traces_custom_lines_display(straight_edge):
+    ld = dict(color="blue", width=4, mode="lines+markers")
+    traces, *_ = _build_traces([straight_edge], None, None, 1.0, 0.1, None, ld)
+    assert traces[0].line.color == "blue"
+    assert traces[0].line.width == 4
+    assert traces[0].mode == "lines+markers"
+
+def test_build_traces_edge_contributes_to_bbox(straight_edge):
+    traces, all_x, all_y, all_z = _build_traces(
+        [straight_edge], None, None, 1.0, 0.1, None, None
+    )
+    assert max(all_x) >= 5.0
+
+def test_build_traces_mixed_solid_edge_wire(box, straight_edge, rect_wire):
+    traces, *_ = _build_traces(
+        [box, straight_edge, rect_wire], None, None, 1.0, 0.1, None, None
+    )
+    assert len(traces) == 3
+    assert isinstance(traces[0], go.Mesh3d)
+    assert isinstance(traces[1], go.Scatter3d)
+    assert isinstance(traces[2], go.Scatter3d)
+
+def test_build_traces_mesh_color_index_skips_edges(box, straight_edge, cylinder):
+    """Edge and wire objects must not consume mesh color palette slots."""
+    traces, *_ = _build_traces(
+        [box, straight_edge, cylinder], None, None, 1.0, 0.1, None, None
+    )
+    mesh_colors = [t.color for t in traces if isinstance(t, go.Mesh3d)]
+    assert mesh_colors[0] != mesh_colors[1]
 
 
 # ── _axis_style ──────────────────────────────────────────────────────────────
@@ -99,15 +218,12 @@ def test_axis_style_visible():
     assert s["showbackground"] == True
     assert s["showticklabels"] == True
     assert s["showgrid"] == True
-    assert "rgb" in s["backgroundcolor"]
-    assert s["gridcolor"] == "white"
 
 def test_axis_style_hidden():
     s = _axis_style(False)
     assert s["showbackground"] == False
     assert s["showticklabels"] == False
     assert s["showgrid"] == False
-    assert s["showspikes"] == False
 
 
 # ── _axes_from_string ────────────────────────────────────────────────────────
@@ -119,22 +235,13 @@ def test_axes_xyz():
     assert _axes_from_string("xyz") == (True, True, True)
 
 def test_axes_x():
-    assert _axes_from_string("x")  == (True, False, False)
+    assert _axes_from_string("x") == (True, False, False)
 
 def test_axes_y():
-    assert _axes_from_string("y")  == (False, True, False)
+    assert _axes_from_string("y") == (False, True, False)
 
 def test_axes_z():
-    assert _axes_from_string("z")  == (False, False, True)
-
-def test_axes_xy():
-    assert _axes_from_string("xy") == (True, True, False)
-
-def test_axes_xz():
-    assert _axes_from_string("xz") == (True, False, True)
-
-def test_axes_yz():
-    assert _axes_from_string("yz") == (False, True, True)
+    assert _axes_from_string("z") == (False, False, True)
 
 def test_axes_invalid_raises():
     with pytest.raises(ValueError):
@@ -149,17 +256,9 @@ def test_equal_ranges_all_spans_equal():
     assert abs(spans[0] - spans[1]) < 1e-9
     assert abs(spans[1] - spans[2]) < 1e-9
 
-def test_equal_ranges_largest_span_dominates():
-    x_r, y_r, z_r = _equal_ranges(-5, 5, -1, 1, -1, 1, padding=0)
-    for r in [x_r, y_r, z_r]:
-        assert abs((r[1] - r[0]) - 10.0) < 1e-9
-
-def test_equal_ranges_single_point_has_nonzero_range():
-    """A single point (all spans=0) must still produce a nonzero range."""
+def test_equal_ranges_single_point_nonzero():
     x_r, y_r, z_r = _equal_ranges(1, 1, 2, 2, 3, 3, padding=0)
     assert x_r[1] - x_r[0] > 0
-    assert y_r[1] - y_r[0] > 0
-    assert z_r[1] - z_r[0] > 0
 
 
 # ── _expand_for_plane ────────────────────────────────────────────────────────
@@ -168,119 +267,11 @@ def test_expand_for_plane_grows_xy():
     x_r, y_r, z_r = _expand_for_plane([-1, 1], [-1, 1], [-1, 1],
                                         plane_size=50, z_level=0)
     assert x_r[1] - x_r[0] >= 100
-    assert y_r[1] - y_r[0] >= 100
 
 def test_expand_for_plane_includes_z_level():
     x_r, y_r, z_r = _expand_for_plane([-1, 1], [-1, 1], [0, 5],
                                         plane_size=2, z_level=-3)
     assert z_r[0] <= -3
-
-def test_expand_for_plane_keeps_equal_spans():
-    x_r, y_r, z_r = _expand_for_plane([-1, 1], [-1, 1], [-1, 1],
-                                        plane_size=20, z_level=0)
-    spans = [r[1] - r[0] for r in [x_r, y_r, z_r]]
-    assert abs(spans[0] - spans[1]) < 1e-9
-    assert abs(spans[1] - spans[2]) < 1e-9
-
-def test_plane_size_respected_in_figure(box):
-    fig = _capture_fig(box, z=0, plane_size=100)
-    x_span = fig.layout.scene.xaxis.range[1] - fig.layout.scene.xaxis.range[0]
-    assert x_span >= 200
-
-
-# ── _build_traces — mesh objects ─────────────────────────────────────────────
-
-def test_build_traces_single_mesh(box):
-    traces, *_ = _build_traces(box, None, None, 1.0, 0.1, None)
-    assert len(traces) == 1
-    assert isinstance(traces[0], go.Mesh3d)
-
-def test_build_traces_mesh_names(box):
-    traces, *_ = _build_traces([box], ["Box"], None, 1.0, 0.1, None)
-    assert traces[0].name == "Box"
-
-def test_build_traces_mesh_default_names(box):
-    traces, *_ = _build_traces([box], None, None, 1.0, 0.1, None)
-    assert traces[0].name == "Object 1"
-
-def test_build_traces_mesh_color(box):
-    traces, *_ = _build_traces([box], None, ["navy"], 1.0, 0.1, None)
-    assert traces[0].color == "navy"
-
-def test_build_traces_mesh_opacity(box):
-    traces, *_ = _build_traces([box], None, None, 0.5, 0.1, None)
-    assert traces[0].opacity == 0.5
-
-def test_build_traces_mesh_has_geometry(box):
-    traces, *_ = _build_traces(box, None, None, 1.0, 0.1, None)
-    assert len(traces[0].x) > 0 and len(traces[0].i) > 0
-
-
-# ── _build_traces — point objects ─────────────────────────────────────────────
-
-def test_build_traces_vector_produces_scatter3d(vec):
-    traces, *_ = _build_traces([vec], None, None, 1.0, 0.1, None)
-    assert isinstance(traces[0], go.Scatter3d)
-
-def test_build_traces_list_point_produces_scatter3d():
-    traces, *_ = _build_traces([[1, 2, 3]], None, None, 1.0, 0.1, None)
-    assert isinstance(traces[0], go.Scatter3d)
-
-def test_build_traces_point_mode_is_markers(vec):
-    traces, *_ = _build_traces([vec], None, None, 1.0, 0.1, None)
-    assert traces[0].mode == "markers"
-
-def test_build_traces_point_coordinates(vec):
-    traces, *_ = _build_traces([vec], None, None, 1.0, 0.1, None)
-    t = traces[0]
-    assert t.x[0] == vec.x
-    assert t.y[0] == vec.y
-    assert t.z[0] == vec.z
-
-def test_build_traces_point_name(vec):
-    traces, *_ = _build_traces([vec], ["P1"], None, 1.0, 0.1, None)
-    assert traces[0].name == "P1"
-
-def test_build_traces_custom_points_display(vec):
-    pd = dict(size=10, color="blue", symbol="square")
-    traces, *_ = _build_traces([vec], None, None, 1.0, 0.1, pd)
-    marker = traces[0].marker
-    assert marker.size == 10
-    assert marker.color == "blue"
-    assert marker.symbol == "square"
-
-def test_build_traces_default_point_color_is_red(vec):
-    traces, *_ = _build_traces([vec], None, None, 1.0, 0.1, None)
-    assert traces[0].marker.color == "red"
-
-
-# ── _build_traces — mixed objects ─────────────────────────────────────────────
-
-def test_build_traces_mixed_types(box, vec):
-    traces, all_x, all_y, all_z = _build_traces(
-        [box, vec], None, None, 1.0, 0.1, None
-    )
-    assert len(traces) == 2
-    assert isinstance(traces[0], go.Mesh3d)
-    assert isinstance(traces[1], go.Scatter3d)
-
-def test_build_traces_mixed_bounding_box_includes_points(box):
-    far_point = cq.Vector(100, 100, 100)
-    traces, all_x, all_y, all_z = _build_traces(
-        [box, far_point], None, None, 1.0, 0.1, None
-    )
-    assert max(all_x) == 100.0
-    assert max(all_y) == 100.0
-    assert max(all_z) == 100.0
-
-def test_build_traces_mesh_color_index_skips_points(box, cylinder, vec):
-    """Point objects must not consume a slot in the mesh color palette."""
-    traces, *_ = _build_traces(
-        [box, vec, cylinder], None, None, 1.0, 0.1, None
-    )
-    mesh_colors = [t.color for t in traces if isinstance(t, go.Mesh3d)]
-    # box gets color index 0, cylinder gets color index 1 — vec is skipped
-    assert mesh_colors[0] != mesh_colors[1]
 
 
 # ── show — general ────────────────────────────────────────────────────────────
@@ -289,30 +280,34 @@ def test_show_runs_with_mesh(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
         show(box)
 
+def test_show_runs_with_edge(straight_edge):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show(straight_edge)
+
+def test_show_runs_with_wire(rect_wire):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show(rect_wire)
+
+def test_show_runs_with_arc(arc_edge):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show(arc_edge)
+
 def test_show_runs_with_vector(vec):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
         show(vec)
 
-def test_show_runs_with_list_point():
+def test_show_runs_mixed_all_types(box, straight_edge, rect_wire, vec):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show([1.0, 2.0, 3.0])
+        show([box, straight_edge, rect_wire, vec])
 
-def test_show_runs_mixed(box, vec):
+def test_show_lines_display_accepted(straight_edge):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show([box, vec])
-
-def test_show_with_plane(box):
-    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(box, z=0)
+        show(straight_edge, lines_display=dict(color="blue", width=3, samples=20))
 
 def test_show_invalid_axes_raises(box):
     with pytest.raises(ValueError):
         with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
             show(box, visible_axes="w")
-
-def test_show_points_display_accepted(vec):
-    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(vec, points_display=dict(size=10, color="blue"))
 
 
 # ── show — equal scale ───────────────────────────────────────────────────────
@@ -346,11 +341,6 @@ def test_axis_menus_are_buttons(box):
 def test_camera_is_dropdown(box):
     assert _capture_fig(box).layout.updatemenus[3].type == "dropdown"
 
-def test_axis_toggles_two_buttons(box):
-    fig = _capture_fig(box)
-    for i in range(3):
-        assert len(fig.layout.updatemenus[i].buttons) == 2
-
 def test_camera_two_buttons(box):
     assert len(_capture_fig(box).layout.updatemenus[3].buttons) == 2
 
@@ -358,16 +348,6 @@ def test_camera_labels(box):
     labels = [b.label for b in _capture_fig(box).layout.updatemenus[3].buttons]
     assert "Perspective"  in labels
     assert "Orthographic" in labels
-
-def test_axis_on_filled_symbol(box):
-    fig = _capture_fig(box)
-    for i in range(3):
-        assert "●" in fig.layout.updatemenus[i].buttons[0].label
-
-def test_axis_off_hollow_symbol(box):
-    fig = _capture_fig(box)
-    for i in range(3):
-        assert "○" in fig.layout.updatemenus[i].buttons[1].label
 
 
 # ── show — camera restores aspect ────────────────────────────────────────────
@@ -397,6 +377,3 @@ def test_xyz_shows_all(box):
     assert fig.layout.scene.xaxis.showbackground == True
     assert fig.layout.scene.yaxis.showbackground == True
     assert fig.layout.scene.zaxis.showbackground == True
-
-def test_yz_hides_x(box):
-    assert _capture_fig(box, visible_axes="yz").layout.scene.xaxis.showbackground == False

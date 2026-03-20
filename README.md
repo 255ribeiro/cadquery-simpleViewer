@@ -7,7 +7,8 @@ An interactive 3D viewer for [CadQuery](https://github.com/CadQuery/cadquery) mo
 ## Features
 
 - Interactive orbit, zoom and pan inside the notebook cell
-- Supports CadQuery solids, `cq.Vector` points, and `[x, y, z]` lists — mixed in the same call
+- Supports CadQuery solids, edges, wires, `cq.Vector` points, and `[x, y, z]` lists — mixed in the same call
+- Edge and wire rendering works with any curve type: straight lines, arcs, ellipses, splines, helices, B-splines
 - Axes visibility toggles (X, Y, Z independently)
 - Camera mode selector (Perspective / Orthographic)
 - Optional ground plane at a chosen elevation
@@ -96,35 +97,88 @@ show(
 
 ---
 
+## Displaying Edges and Wires
+
+`show()` accepts `cq.Edge` and `cq.Wire` objects alongside solids. Any curve type is supported — the geometry is sampled along the curve using `positionAt(t)`, so the result faithfully follows arcs, splines, helices, and B-splines.
+
+### Straight edge
+
+```python
+edge = cq.Edge.makeLine(cq.Vector(0, 0, 0), cq.Vector(5, 0, 0))
+show(edge)
+```
+
+### Arc
+
+```python
+arc = cq.Edge.makeCircle(radius=3.0)
+show(arc, lines_display=dict(color="steelblue", width=3, samples=100))
+```
+
+### Helix
+
+```python
+helix = cq.Wire.makeHelix(pitch=1.0, height=5.0, radius=2.0)
+show(helix, lines_display=dict(color="seagreen", samples=200))
+```
+
+### Mixed solids and curves
+
+```python
+box  = cq.Workplane("XY").box(5, 3, 2)
+arc  = cq.Edge.makeCircle(radius=4.0)
+wire = cq.Wire.makeRect(6.0, 4.0)
+
+show(
+    [box, arc, wire],
+    names=["Box", "Arc", "Rectangle"],
+    lines_display=dict(color="indianred", width=2)
+)
+```
+
+### Customising line appearance
+
+Pass a `lines_display` dict to control the line style. All keys are optional.
+
+```python
+show(
+    helix,
+    lines_display=dict(
+        color="steelblue",
+        width=3,
+        mode="lines+markers",
+        samples=150,
+        opacity=0.8
+    )
+)
+```
+
+| `lines_display` key | Default | Description |
+|---------------------|---------|-------------|
+| `color` | `"red"` | Line color — any CSS name or hex. See [Plotly CSS colors](https://plotly.com/python/css-colors/) |
+| `width` | `2` | Line width in pixels |
+| `mode` | `"lines"` | `"lines"` or `"lines+markers"` |
+| `samples` | `50` | Number of points sampled along each edge. Increase for tight arcs, helices, or complex splines |
+| `opacity` | `1.0` | Line opacity — `0.0` to `1.0` |
+
+> **Choosing `samples`**: straight lines need only 2, a full circle looks smooth at 50–100, and a helix with many turns may need 200 or more. When in doubt, start high and reduce if performance is a concern.
+
+---
+
 ## Displaying Points
 
-`show()` accepts `cq.Vector` objects and `[x, y, z]` lists alongside CadQuery solids. Points are rendered as `Scatter3d` markers — no tessellation involved.
+`show()` accepts `cq.Vector` objects and `[x, y, z]` lists alongside any other object type. Points are rendered as `Scatter3d` markers — no tessellation involved.
 
 ### Single point
 
 ```python
 show(cq.Vector(2.5, 0, 1))
-```
 
-### List notation
-
-```python
+# List notation
 show([2.5, 0, 1])
 ```
 
-### Mixed solids and points
-
-```python
-box    = cq.Workplane("XY").box(5, 3, 2)
-corner = cq.Vector(2.5, 1.5, 1.0)
-
-show(
-    [box, corner],
-    names=["Box", "Corner"]
-)
-```
-
-### Multiple points from edge division
+### Points from edge division
 
 ```python
 def divide_edge(edge, n):
@@ -140,21 +194,20 @@ points = divide_edge(edge, 8)
 show(points, names=["P" + str(i) for i in range(len(points))])
 ```
 
-### Customising point appearance
-
-Pass a `points_display` dict to control the marker style. All keys are optional — unspecified keys fall back to the defaults.
+### Mixed solids and points
 
 ```python
+box    = cq.Workplane("XY").box(5, 3, 2)
+corner = cq.Vector(2.5, 1.5, 1.0)
+
 show(
-    [box] + points,
-    points_display=dict(
-        size=8,
-        color="blue",
-        symbol="diamond",
-        opacity=0.9
-    )
+    [box, corner],
+    names=["Box", "Corner"],
+    points_display=dict(size=8, color="red", symbol="diamond")
 )
 ```
+
+### Customising point appearance
 
 | `points_display` key | Default | Options |
 |----------------------|---------|---------|
@@ -163,7 +216,7 @@ show(
 | `symbol` | `"circle"` | `"circle"`, `"circle-open"`, `"square"`, `"diamond"`, `"cross"`, `"x"` |
 | `opacity` | `1.0` | `0.0` – `1.0` |
 
-> Note: `points_display` applies the same style to all point objects in the call. To display points with different colors, make separate `show()` calls or use `go.Scatter3d` directly.
+> `points_display` and `lines_display` apply uniformly to all points and lines in the call respectively.
 
 ---
 
@@ -204,6 +257,7 @@ show(
     tessellation_tolerance=0.01,
     padding=0.15,
     points_display=None,
+    lines_display=None,
 )
 ```
 
@@ -211,22 +265,21 @@ show(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `objects` | object or list | — | CadQuery `Workplane`, `cq.Vector`, `[x, y, z]` list, or any mix of these |
+| `objects` | object or list | — | Any mix of CadQuery `Workplane`, `cq.Edge`, `cq.Wire`, `cq.Vector`, or `[x, y, z]` lists |
 | `names` | list of str | `None` | Legend label for each object. Defaults to `"Object 1"`, `"Object 2"`, … |
-| `colors` | list of str | `None` | Face color for each mesh object. Accepts CSS color names and hex values. See [Plotly CSS colors](https://plotly.com/python/css-colors/). Defaults to a built-in palette |
-| `opacity` | float | `1.0` | Surface opacity for mesh objects. `1.0` = fully opaque, `0.0` = fully transparent |
+| `colors` | list of str | `None` | Face color for each mesh object. Accepts CSS color names and hex. See [Plotly CSS colors](https://plotly.com/python/css-colors/). Defaults to a built-in palette |
+| `opacity` | float | `1.0` | Surface opacity for mesh objects. `1.0` = fully opaque |
 | `visible_axes` | str or None | `"xyz"` | Initial axes visibility. `None` hides all axes. Valid values: `None`, `"x"`, `"y"`, `"z"`, `"xy"`, `"xz"`, `"yz"`, `"xyz"` |
 | `z` | float or None | `None` | Elevation of the ground plane. `None` = no plane drawn |
 | `plane_color` | str | `"whitesmoke"` | Color of the ground plane |
-| `plane_size` | float | `50` | Half-side length of the ground plane quad. The plane extends `±plane_size` from the scene center in X and Y |
+| `plane_size` | float | `50` | Half-side length of the ground plane quad |
 | `plane_opacity` | float | `0.8` | Opacity of the ground plane |
-| `tessellation_tolerance` | float | `0.01` | Mesh precision for BREP→triangle conversion. Smaller = finer mesh, slower |
+| `tessellation_tolerance` | float | `0.01` | Mesh precision for solid → triangle conversion. Smaller = finer, slower |
 | `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis |
-| `points_display` | dict or None | `None` | Marker style for point objects. See keys in the table above. `None` uses defaults |
+| `points_display` | dict or None | `None` | Marker style for point objects. Keys: `size`, `color`, `symbol`, `opacity` |
+| `lines_display` | dict or None | `None` | Line style for edge and wire objects. Keys: `color`, `width`, `mode`, `samples`, `opacity` |
 
 ### Interactive controls
-
-Once rendered, the figure provides:
 
 | Control | Action |
 |---------|--------|
@@ -241,8 +294,6 @@ Once rendered, the figure provides:
 ---
 
 ## Pixi environment example
-
-A minimal `pixi.toml` for a CadQuery project using this viewer:
 
 ```toml
 [workspace]

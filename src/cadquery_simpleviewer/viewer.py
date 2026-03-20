@@ -14,15 +14,25 @@ _DEFAULT_POINTS_DISPLAY = dict(
     opacity=1.0,
 )
 
+_DEFAULT_LINES_DISPLAY = dict(
+    color="red",
+    width=2,
+    mode="lines",       # "lines", "lines+markers"
+    samples=50,         # number of sample points along the curve
+    opacity=1.0,
+)
+
 _VALID_AXES = {None, "x", "y", "z", "xy", "xz", "yz", "xyz"}
 
 _EQUAL_ASPECT = dict(x=1, y=1, z=1)
 
 
+# ── type detection ────────────────────────────────────────────────────────────
+
 def _is_point(obj):
     """
     Return True if obj is a cq.Vector or a list/tuple of exactly 3 numbers.
-    These are rendered as Scatter3d markers instead of tessellated meshes.
+    These are rendered as Scatter3d markers.
     """
     if isinstance(obj, cq.occ_impl.geom.Vector):
         return True
@@ -31,12 +41,83 @@ def _is_point(obj):
     return False
 
 
+def _is_edge(obj):
+    """Return True if obj is a cq.Edge."""
+    return isinstance(obj, cq.occ_impl.shapes.Edge)
+
+
+def _is_wire(obj):
+    """Return True if obj is a cq.Wire."""
+    return isinstance(obj, cq.occ_impl.shapes.Wire)
+
+
+# ── coordinate extraction ─────────────────────────────────────────────────────
+
 def _point_to_xyz(obj):
     """Extract (x, y, z) from a cq.Vector or a [x, y, z] list/tuple."""
     if isinstance(obj, cq.occ_impl.geom.Vector):
         return obj.x, obj.y, obj.z
     return float(obj[0]), float(obj[1]), float(obj[2])
 
+
+def _sample_edge(edge, samples):
+    """
+    Sample a cq.Edge into x, y, z coordinate lists using positionAt(t).
+
+    positionAt(t) follows the actual curve geometry for any edge type:
+    straight lines, arcs, ellipses, splines, helices, B-splines, etc.
+    The 'samples' parameter controls resolution — more samples = smoother
+    curves but larger traces.
+
+    Returns three lists: x, y, z.
+    """
+    x = []
+    y = []
+    z = []
+
+    for i in range(samples + 1):
+        t = i / samples
+        p = edge.positionAt(t)
+        x.append(p.x)
+        y.append(p.y)
+        z.append(p.z)
+
+    return x, y, z
+
+
+def _sample_wire(wire, samples):
+    """
+    Sample a cq.Wire into x, y, z coordinate lists.
+
+    A wire is a chain of edges. Each edge is sampled individually and the
+    results are concatenated. A None separator is inserted between edges
+    so Plotly draws them as disconnected segments rather than connecting
+    the last point of one edge to the first point of the next.
+
+    Returns three lists: x, y, z.
+    """
+    x = []
+    y = []
+    z = []
+
+    edges = wire.Edges()
+
+    for index in range(len(edges)):
+        ex, ey, ez = _sample_edge(edges[index], samples)
+        x.extend(ex)
+        y.extend(ey)
+        z.extend(ez)
+
+        # None separator tells Plotly to lift the pen between edges
+        if index < len(edges) - 1:
+            x.append(None)
+            y.append(None)
+            z.append(None)
+
+    return x, y, z
+
+
+# ── axis style ────────────────────────────────────────────────────────────────
 
 def _axis_style(visible: bool) -> dict:
     """
@@ -92,38 +173,87 @@ def _axes_from_string(visible_axes):
     return "x" in key, "y" in key, "z" in key
 
 
+# ── trace building ────────────────────────────────────────────────────────────
+
 def _build_traces(objects, names, colors, opacity,
-                  tessellation_tolerance, points_display):
+                  tessellation_tolerance, points_display, lines_display):
     """
-    Build Plotly traces from a mixed list of CadQuery objects and point objects.
+    Build Plotly traces from a mixed list of objects.
 
-    CadQuery Workplane objects → go.Mesh3d (tessellated)
-    cq.Vector or [x, y, z]   → go.Scatter3d (markers only)
+    CadQuery Workplane (solid) → go.Mesh3d  (tessellated)
+    cq.Edge / cq.Wire          → go.Scatter3d (sampled lines)
+    cq.Vector / [x, y, z]     → go.Scatter3d (markers)
 
-    Returns (traces, all_x, all_y, all_z) where the coordinate lists cover
+    Returns (traces, all_x, all_y, all_z) where the coordinate lists span
     all objects for bounding box computation.
     """
     if not isinstance(objects, list):
         objects = [objects]
 
-    # Merge caller's points_display with defaults (caller wins)
-    marker_style = dict(_DEFAULT_POINTS_DISPLAY)
+    # Merge caller dicts with defaults (caller wins)
+    p_style = dict(_DEFAULT_POINTS_DISPLAY)
     if points_display is not None:
-        marker_style.update(points_display)
+        p_style.update(points_display)
 
-    traces  = []
-    all_x   = []
-    all_y   = []
-    all_z   = []
+    l_style = dict(_DEFAULT_LINES_DISPLAY)
+    if lines_display is not None:
+        l_style.update(lines_display)
 
+    samples = int(l_style.get("samples", 50))
+
+    traces          = []
+    all_x           = []
+    all_y           = []
+    all_z           = []
     mesh_color_index = 0
 
     for index in range(len(objects)):
         obj  = objects[index]
         name = names[index] if names else "Object " + str(index + 1)
 
-        if _is_point(obj):
-            # --- Point object → Scatter3d marker ---
+        # ── Edge ──────────────────────────────────────────────────────────
+        if _is_edge(obj):
+            x, y, z = _sample_edge(obj, samples)
+
+            # Filter None values for bounding box
+            all_x.extend(v for v in x if v is not None)
+            all_y.extend(v for v in y if v is not None)
+            all_z.extend(v for v in z if v is not None)
+
+            traces.append(go.Scatter3d(
+                x=x, y=y, z=z,
+                mode=l_style.get("mode", "lines"),
+                line=dict(
+                    color=l_style.get("color", "red"),
+                    width=l_style.get("width", 2),
+                ),
+                opacity=l_style.get("opacity", 1.0),
+                name=name,
+                showlegend=True,
+            ))
+
+        # ── Wire ──────────────────────────────────────────────────────────
+        elif _is_wire(obj):
+            x, y, z = _sample_wire(obj, samples)
+
+            all_x.extend(v for v in x if v is not None)
+            all_y.extend(v for v in y if v is not None)
+            all_z.extend(v for v in z if v is not None)
+
+            traces.append(go.Scatter3d(
+                x=x, y=y, z=z,
+                mode=l_style.get("mode", "lines"),
+                line=dict(
+                    color=l_style.get("color", "red"),
+                    width=l_style.get("width", 2),
+                ),
+                opacity=l_style.get("opacity", 1.0),
+                name=name,
+                showlegend=True,
+            ))
+
+        # ── Point ─────────────────────────────────────────────────────────
+        elif _is_point(obj):
             px, py, pz = _point_to_xyz(obj)
             all_x.append(px)
             all_y.append(py)
@@ -133,17 +263,17 @@ def _build_traces(objects, names, colors, opacity,
                 x=[px], y=[py], z=[pz],
                 mode="markers",
                 marker=dict(
-                    size=marker_style.get("size", 5),
-                    color=marker_style.get("color", "red"),
-                    symbol=marker_style.get("symbol", "circle"),
-                    opacity=marker_style.get("opacity", 1.0),
+                    size=p_style.get("size", 5),
+                    color=p_style.get("color", "red"),
+                    symbol=p_style.get("symbol", "circle"),
+                    opacity=p_style.get("opacity", 1.0),
                 ),
                 name=name,
                 showlegend=True,
             ))
 
+        # ── CadQuery solid ────────────────────────────────────────────────
         else:
-            # --- CadQuery object → tessellated Mesh3d ---
             vertices, triangles = obj.val().tessellate(tessellation_tolerance)
 
             x  = []
@@ -186,6 +316,8 @@ def _build_traces(objects, names, colors, opacity,
     return traces, all_x, all_y, all_z
 
 
+# ── range helpers ─────────────────────────────────────────────────────────────
+
 def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
     """
     Compute equal axis ranges centered on each axis midpoint.
@@ -204,7 +336,6 @@ def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
     z_span = zmax - zmin
 
     half = max(x_span, y_span, z_span) / 2 * (1 + padding)
-    # Ensure a minimum half-span so single points don't collapse to zero range
     half = max(half, 1.0)
 
     return (
@@ -216,8 +347,8 @@ def _equal_ranges(xmin, xmax, ymin, ymax, zmin, zmax, padding):
 
 def _expand_for_plane(x_range, y_range, z_range, plane_size, z_level):
     """
-    Expand the axis ranges to include the base plane extents so it is
-    never clipped by the explicit axis ranges.
+    Expand axis ranges to include the base plane extents so it is never
+    clipped by the explicit axis ranges.
     """
     x_center = (x_range[0] + x_range[1]) / 2
     y_center = (y_range[0] + y_range[1]) / 2
@@ -255,11 +386,10 @@ def _axis_dict(visible: bool, val_range: list) -> dict:
     return d
 
 
+# ── UI controls ───────────────────────────────────────────────────────────────
+
 def _make_axis_toggle(label, scene_key, initial_visible, val_range, x_pos):
-    """
-    Build an on/off button pair for one axis.
-    type='buttons' renders them as a side-by-side segmented control.
-    """
+    """Build an on/off button pair for one axis."""
     on_dict  = _axis_dict(True,  val_range)
     off_dict = _axis_dict(False, val_range)
 
@@ -339,6 +469,8 @@ def _make_camera_menu(x_pos):
     )
 
 
+# ── public API ────────────────────────────────────────────────────────────────
+
 def show(
     objects,
     names=None,
@@ -352,21 +484,24 @@ def show(
     tessellation_tolerance=0.01,
     padding=0.15,
     points_display=None,
+    lines_display=None,
 ):
     """
     Display one or more CadQuery objects as an interactive 3D Plotly figure.
 
-    Accepts a mixed list of CadQuery Workplane objects, cq.Vector points,
-    and [x, y, z] lists. Workplane objects are tessellated into meshes;
-    points are rendered as Scatter3d markers.
+    Accepts a mixed list of object types in any combination:
+      - CadQuery Workplane (solid)  → tessellated mesh
+      - cq.Edge / cq.Wire           → sampled line (works with straight lines,
+                                      arcs, ellipses, splines, helices, etc.)
+      - cq.Vector / [x, y, z]       → point marker
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
 
     Parameters
     ----------
-    objects                 : object or list — CadQuery Workplane, cq.Vector,
-                              or [x, y, z] list, or any mix of these
+    objects                 : object or list — any mix of CadQuery Workplane,
+                              cq.Edge, cq.Wire, cq.Vector, or [x, y, z] lists
     names                   : list of legend labels (optional)
     colors                  : list of face colors for mesh objects —
                               see https://plotly.com/python/css-colors/
@@ -382,16 +517,23 @@ def show(
     points_display          : dict to configure point markers. Keys (all optional):
                                 size    — marker size in pixels (default 5)
                                 color   — marker color (default "red")
-                                symbol  — marker shape (default "circle")
-                                         other options: "square", "diamond",
-                                         "cross", "x", "circle-open"
+                                symbol  — "circle", "square", "diamond",
+                                          "cross", "x", "circle-open" (default "circle")
                                 opacity — marker opacity (default 1.0)
+    lines_display           : dict to configure edge/wire lines. Keys (all optional):
+                                color   — line color (default "red")
+                                width   — line width in pixels (default 2)
+                                mode    — "lines" or "lines+markers" (default "lines")
+                                samples — number of points sampled along each edge
+                                          (default 50). Increase for tight curves,
+                                          helices, or complex splines.
+                                opacity — line opacity (default 1.0)
     """
     show_x, show_y, show_z = _axes_from_string(visible_axes)
 
     traces, all_x, all_y, all_z = _build_traces(
         objects, names, colors, opacity,
-        tessellation_tolerance, points_display
+        tessellation_tolerance, points_display, lines_display
     )
 
     if z is not None:
