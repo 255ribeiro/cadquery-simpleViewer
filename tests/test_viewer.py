@@ -3,7 +3,13 @@ import plotly.graph_objects as go
 import pytest
 from unittest.mock import patch
 
-from cadquery_simpleviewer.viewer import _build_traces, show, show_arch
+from cadquery_simpleviewer.viewer import (
+    _build_traces,
+    _bounding_box,
+    _axes_from_string,
+    _axis_style,
+    show,
+)
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -23,10 +29,78 @@ def two_objects(box, cylinder):
     return [box, cylinder]
 
 
+# ── _axis_style ──────────────────────────────────────────────────────────────
+
+def test_axis_style_visible_has_background():
+    style = _axis_style(True)
+    assert style["showbackground"] == True
+    assert style["showticklabels"] == True
+    assert style["showgrid"] == True
+
+
+def test_axis_style_hidden_has_no_background():
+    style = _axis_style(False)
+    assert style["showbackground"] == False
+    assert style["showticklabels"] == False
+    assert style["showgrid"] == False
+
+
+def test_axis_style_visible_uses_default_plotly_colors():
+    style = _axis_style(True)
+    assert "rgb" in style["backgroundcolor"]
+    assert style["gridcolor"] == "white"
+
+
+# ── _axes_from_string ────────────────────────────────────────────────────────
+
+def test_axes_none_maps_to_all_visible():
+    x, y, z = _axes_from_string("xyz")
+    assert x == True
+    assert y == True
+    assert z == True
+
+
+def test_axes_x_only():
+    x, y, z = _axes_from_string("x")
+    assert x == True
+    assert y == False
+    assert z == False
+
+
+def test_axes_xy():
+    x, y, z = _axes_from_string("xy")
+    assert x == True
+    assert y == True
+    assert z == False
+
+
+def test_axes_yz():
+    x, y, z = _axes_from_string("yz")
+    assert x == False
+    assert y == True
+    assert z == True
+
+
+def test_axes_z_only():
+    x, y, z = _axes_from_string("z")
+    assert x == False
+    assert y == False
+    assert z == True
+
+
+def test_axes_invalid_raises():
+    with pytest.raises(ValueError):
+        _axes_from_string("w")
+
+
+def test_axes_invalid_combined_raises():
+    with pytest.raises(ValueError):
+        _axes_from_string("xw")
+
+
 # ── _build_traces ────────────────────────────────────────────────────────────
 
 def test_build_traces_single_object(box):
-    """A single object (not a list) must be accepted and produce one trace."""
     traces = _build_traces(box, names=None, colors=None,
                            opacity=1.0, tessellation_tolerance=0.1)
     assert len(traces) == 1
@@ -40,8 +114,7 @@ def test_build_traces_multiple_objects(two_objects):
 
 
 def test_build_traces_custom_names(two_objects):
-    names = ["Box", "Cylinder"]
-    traces = _build_traces(two_objects, names=names, colors=None,
+    traces = _build_traces(two_objects, names=["Box", "Cylinder"], colors=None,
                            opacity=1.0, tessellation_tolerance=0.1)
     assert traces[0].name == "Box"
     assert traces[1].name == "Cylinder"
@@ -67,12 +140,32 @@ def test_build_traces_opacity(box):
 
 
 def test_build_traces_has_geometry(box):
-    """Tessellated trace must have vertices and triangle indices."""
     traces = _build_traces(box, names=None, colors=None,
                            opacity=1.0, tessellation_tolerance=0.1)
-    trace = traces[0]
-    assert len(trace.x) > 0
-    assert len(trace.i) > 0
+    assert len(traces[0].x) > 0
+    assert len(traces[0].i) > 0
+
+
+# ── _bounding_box ────────────────────────────────────────────────────────────
+
+def test_bounding_box_single_trace(box):
+    traces = _build_traces(box, None, None, 1.0, 0.1)
+    xmin, xmax, ymin, ymax, zmin, zmax = _bounding_box(traces)
+    assert xmin < xmax
+    assert ymin < ymax
+    assert zmin < zmax
+
+
+def test_bounding_box_excludes_plane_trace():
+    """Base plane trace has showlegend=False and must be excluded from bbox."""
+    from cadquery_simpleviewer.plane import _base_plane
+    plane = _base_plane(size=100, color="white", opacity=1.0, z=0)
+    box_obj = cq.Workplane("XY").box(2, 2, 2)
+    traces = _build_traces(box_obj, None, None, 1.0, 0.1)
+    traces.insert(0, plane)
+    xmin, xmax, ymin, ymax, zmin, zmax = _bounding_box(traces)
+    # bounding box must reflect the box geometry, not the 100-unit plane
+    assert xmax < 10
 
 
 # ── show ─────────────────────────────────────────────────────────────────────
@@ -82,49 +175,126 @@ def test_show_runs_without_error(box):
         show(box)
 
 
-def test_show_axes_are_visible(box):
-    """show() must keep axes on — showticklabels must be True."""
+def test_show_default_visible_axes_is_xyz(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        # Rebuild the figure manually to inspect layout
-        import plotly.graph_objects as go
-        from cadquery_simpleviewer.viewer import _build_traces, _AXIS_ON
-        traces = _build_traces(box, None, None, 1.0, 0.1)
-        fig = go.Figure(data=traces)
-        fig.update_layout(scene=dict(xaxis=dict(**_AXIS_ON)))
-        assert fig.layout.scene.xaxis.showticklabels == True
+        # Should not raise — xyz is the default
+        show(box, visible_axes="xyz")
 
 
-# ── show_arch ────────────────────────────────────────────────────────────────
-
-def test_show_arch_runs_without_error(box):
+def test_show_accepts_none_axes(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show_arch(box)
+        show(box, visible_axes=None)
 
 
-def test_show_arch_with_plane(two_objects):
-    """When z is set, the first trace must be the base plane."""
+def test_show_invalid_axes_raises(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        from cadquery_simpleviewer.viewer import _build_traces
-        from cadquery_simpleviewer.plane import _base_plane
-
-        traces = _build_traces(two_objects, None, None, 1.0, 0.1)
-        plane  = _base_plane(size=50, color="whitesmoke", opacity=0.8, z=0)
-        traces.insert(0, plane)
-
-        # First trace is the plane — it has no legend entry
-        assert traces[0].showlegend == False
+        with pytest.raises(ValueError):
+            show(box, visible_axes="w")
 
 
-def test_show_arch_without_plane(box):
-    """When z is None, no base plane trace must be added."""
+def test_show_with_plane(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        from cadquery_simpleviewer.viewer import _build_traces
-        traces = _build_traces(box, None, None, 1.0, 0.1)
-        # z=None means no insertion — only the object trace
-        assert len(traces) == 1
+        show(box, z=0)
 
 
-def test_show_arch_axes_are_off(box):
-    """show_arch() must have axes hidden — showticklabels must be False."""
-    from cadquery_simpleviewer.viewer import _AXIS_OFF
-    assert _AXIS_OFF["showticklabels"] == False
+def test_show_without_plane(box):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show(box, z=None)
+
+
+def test_show_has_updatemenus(box):
+    """Figure must contain 4 updatemenus: X, Y, Z axes + camera."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box)
+
+    fig = captured["fig"]
+    assert len(fig.layout.updatemenus) == 4
+
+
+def test_show_camera_menu_has_three_options(box):
+    """Camera dropdown must have exactly 3 buttons."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box)
+
+    fig = captured["fig"]
+    # Camera menu is the 4th updatemenu (index 3)
+    camera_menu = fig.layout.updatemenus[3]
+    assert len(camera_menu.buttons) == 3
+
+
+def test_show_equal_aspect_ratio(box):
+    """Scene aspectratio must be 1:1:1 to enforce equal axis scaling."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box)
+
+    fig = captured["fig"]
+    ratio = fig.layout.scene.aspectratio
+    assert ratio.x == 1
+    assert ratio.y == 1
+    assert ratio.z == 1
+
+
+def test_show_equal_axis_ranges(box):
+    """X, Y and Z axis ranges must have the same span to ensure equal scaling."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box)
+
+    fig = captured["fig"]
+    scene = fig.layout.scene
+
+    x_span = scene.xaxis.range[1] - scene.xaxis.range[0]
+    y_span = scene.yaxis.range[1] - scene.yaxis.range[0]
+    z_span = scene.zaxis.range[1] - scene.zaxis.range[0]
+
+    assert abs(x_span - y_span) < 1e-9
+    assert abs(y_span - z_span) < 1e-9
+
+
+def test_show_x_axis_hidden_when_not_in_visible_axes(box):
+    """When visible_axes='yz', x axis must have showbackground=False."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box, visible_axes="yz")
+
+    fig = captured["fig"]
+    assert fig.layout.scene.xaxis.showbackground == False
+
+
+def test_show_all_axes_visible_when_xyz(box):
+    """When visible_axes='xyz', all three axes must have showbackground=True."""
+    captured = {}
+
+    def fake_show(self):
+        captured["fig"] = self
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show", fake_show):
+        show(box, visible_axes="xyz")
+
+    fig = captured["fig"]
+    assert fig.layout.scene.xaxis.showbackground == True
+    assert fig.layout.scene.yaxis.showbackground == True
+    assert fig.layout.scene.zaxis.showbackground == True
