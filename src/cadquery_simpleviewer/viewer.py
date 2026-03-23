@@ -15,7 +15,7 @@ _DEFAULT_POINTS_DISPLAY = dict(
 )
 
 _DEFAULT_LINES_DISPLAY = dict(
-    color="red",
+    color="steelblue",
     width=2,
     mode="lines",       # "lines", "lines+markers"
     samples=50,         # number of sample points along the curve
@@ -49,6 +49,30 @@ def _is_edge(obj):
 def _is_wire(obj):
     """Return True if obj is a cq.Wire."""
     return isinstance(obj, cq.occ_impl.shapes.Wire)
+
+
+def _is_pending_wire(obj):
+    """
+    Return True if obj is a Workplane whose stack holds a Wire or Edge
+    (i.e. a 2D sketch like .rect(), .circle(), .polygon() that has not
+    been extruded yet). These objects cannot be tessellated as solids
+    and must be extracted before display.
+    """
+    if not isinstance(obj, cq.Workplane):
+        return False
+    try:
+        val = obj.val()
+        return isinstance(val, (cq.occ_impl.shapes.Wire, cq.occ_impl.shapes.Edge))
+    except Exception:
+        return False
+
+
+def _extract_wire(obj):
+    """
+    Extract a cq.Wire or cq.Edge from a Workplane with a pending sketch.
+    Called automatically when _is_pending_wire() returns True.
+    """
+    return obj.wires().val()
 
 
 # ── coordinate extraction ─────────────────────────────────────────────────────
@@ -210,6 +234,10 @@ def _build_traces(objects, names, colors, opacity,
     for index in range(len(objects)):
         obj  = objects[index]
         name = names[index] if names else "Object " + str(index + 1)
+
+        # ── Workplane with pending wire (e.g. .rect(), .circle(), .polygon()) ──
+        if _is_pending_wire(obj):
+            obj = _extract_wire(obj)
 
         # ── Edge ──────────────────────────────────────────────────────────
         if _is_edge(obj):

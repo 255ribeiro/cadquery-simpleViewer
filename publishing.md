@@ -77,4 +77,4 @@ uv publish --token $env:PYPI_TOKEN
 
 ## Important
 
-### Uptade the version number in .toml file before building and publishing
+### Update the version number in .toml file before building and publishing
