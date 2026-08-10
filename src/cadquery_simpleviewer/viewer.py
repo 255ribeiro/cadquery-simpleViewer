@@ -1,5 +1,5 @@
-import cadquery as cq
 import plotly.graph_objects as go
+from .adapters import get_adapter
 from .plane import _base_plane
 
 _DEFAULT_COLORS = [
@@ -27,118 +27,18 @@ _VALID_AXES = {None, "x", "y", "z", "xy", "xz", "yz", "xyz"}
 _EQUAL_ASPECT = dict(x=1, y=1, z=1)
 
 
-# ── type detection ────────────────────────────────────────────────────────────
+# ── plain point detection (no CAD library involved) ────────────────────────────
 
-def _is_point(obj):
-    """
-    Return True if obj is a cq.Vector or a list/tuple of exactly 3 numbers.
-    These are rendered as Scatter3d markers.
-    """
-    if isinstance(obj, cq.occ_impl.geom.Vector):
-        return True
+def _is_plain_point(obj):
+    """Return True if obj is a list/tuple of exactly 3 numbers."""
     if isinstance(obj, (list, tuple)) and len(obj) == 3:
         return all(isinstance(v, (int, float)) for v in obj)
     return False
 
 
-def _is_edge(obj):
-    """Return True if obj is a cq.Edge."""
-    return isinstance(obj, cq.occ_impl.shapes.Edge)
-
-
-def _is_wire(obj):
-    """Return True if obj is a cq.Wire."""
-    return isinstance(obj, cq.occ_impl.shapes.Wire)
-
-
-def _is_pending_wire(obj):
-    """
-    Return True if obj is a Workplane whose stack holds a Wire or Edge
-    (i.e. a 2D sketch like .rect(), .circle(), .polygon() that has not
-    been extruded yet). These objects cannot be tessellated as solids
-    and must be extracted before display.
-    """
-    if not isinstance(obj, cq.Workplane):
-        return False
-    try:
-        val = obj.val()
-        return isinstance(val, (cq.occ_impl.shapes.Wire, cq.occ_impl.shapes.Edge))
-    except Exception:
-        return False
-
-
-def _extract_wire(obj):
-    """
-    Extract a cq.Wire or cq.Edge from a Workplane with a pending sketch.
-    Called automatically when _is_pending_wire() returns True.
-    """
-    return obj.wires().val()
-
-
-# ── coordinate extraction ─────────────────────────────────────────────────────
-
-def _point_to_xyz(obj):
-    """Extract (x, y, z) from a cq.Vector or a [x, y, z] list/tuple."""
-    if isinstance(obj, cq.occ_impl.geom.Vector):
-        return obj.x, obj.y, obj.z
+def _plain_point_to_xyz(obj):
+    """Extract (x, y, z) from a [x, y, z] list/tuple."""
     return float(obj[0]), float(obj[1]), float(obj[2])
-
-
-def _sample_edge(edge, samples):
-    """
-    Sample a cq.Edge into x, y, z coordinate lists using positionAt(t).
-
-    positionAt(t) follows the actual curve geometry for any edge type:
-    straight lines, arcs, ellipses, splines, helices, B-splines, etc.
-    The 'samples' parameter controls resolution — more samples = smoother
-    curves but larger traces.
-
-    Returns three lists: x, y, z.
-    """
-    x = []
-    y = []
-    z = []
-
-    for i in range(samples + 1):
-        t = i / samples
-        p = edge.positionAt(t)
-        x.append(p.x)
-        y.append(p.y)
-        z.append(p.z)
-
-    return x, y, z
-
-
-def _sample_wire(wire, samples):
-    """
-    Sample a cq.Wire into x, y, z coordinate lists.
-
-    A wire is a chain of edges. Each edge is sampled individually and the
-    results are concatenated. A None separator is inserted between edges
-    so Plotly draws them as disconnected segments rather than connecting
-    the last point of one edge to the first point of the next.
-
-    Returns three lists: x, y, z.
-    """
-    x = []
-    y = []
-    z = []
-
-    edges = wire.Edges()
-
-    for index in range(len(edges)):
-        ex, ey, ez = _sample_edge(edges[index], samples)
-        x.extend(ex)
-        y.extend(ey)
-        z.extend(ez)
-
-        # None separator tells Plotly to lift the pen between edges
-        if index < len(edges) - 1:
-            x.append(None)
-            y.append(None)
-            z.append(None)
-
-    return x, y, z
 
 
 # ── axis style ────────────────────────────────────────────────────────────────
@@ -202,11 +102,16 @@ def _axes_from_string(visible_axes):
 def _build_traces(objects, names, colors, opacity,
                   tessellation_tolerance, points_display, lines_display):
     """
-    Build Plotly traces from a mixed list of objects.
+    Build Plotly traces from a mixed list of CadQuery and/or build123d objects.
 
-    CadQuery Workplane (solid) → go.Mesh3d  (tessellated)
-    cq.Edge / cq.Wire          → go.Scatter3d (sampled lines)
-    cq.Vector / [x, y, z]     → go.Scatter3d (markers)
+    Solid (CadQuery Workplane / build123d Part, Sketch, Solid, Compound)
+                                       → go.Mesh3d  (tessellated)
+    Edge / Wire                       → go.Scatter3d (sampled lines)
+    Vector / [x, y, z]                → go.Scatter3d (markers)
+
+    Which library an object belongs to is resolved per-object via
+    adapters.get_adapter(), so CadQuery and build123d objects can be
+    freely mixed in the same call.
 
     Returns (traces, all_x, all_y, all_z) where the coordinate lists span
     all objects for bounding box computation.
@@ -235,13 +140,15 @@ def _build_traces(objects, names, colors, opacity,
         obj  = objects[index]
         name = names[index] if names else "Object " + str(index + 1)
 
+        adapter = get_adapter(obj)
+
         # ── Workplane with pending wire (e.g. .rect(), .circle(), .polygon()) ──
-        if _is_pending_wire(obj):
-            obj = _extract_wire(obj)
+        if adapter and adapter.is_pending_wire(obj):
+            obj = adapter.extract_wire(obj)
 
         # ── Edge ──────────────────────────────────────────────────────────
-        if _is_edge(obj):
-            x, y, z = _sample_edge(obj, samples)
+        if adapter and adapter.is_edge(obj):
+            x, y, z = adapter.sample_edge(obj, samples)
 
             # Filter None values for bounding box
             all_x.extend(v for v in x if v is not None)
@@ -261,8 +168,8 @@ def _build_traces(objects, names, colors, opacity,
             ))
 
         # ── Wire ──────────────────────────────────────────────────────────
-        elif _is_wire(obj):
-            x, y, z = _sample_wire(obj, samples)
+        elif adapter and adapter.is_wire(obj):
+            x, y, z = adapter.sample_wire(obj, samples)
 
             all_x.extend(v for v in x if v is not None)
             all_y.extend(v for v in y if v is not None)
@@ -281,8 +188,8 @@ def _build_traces(objects, names, colors, opacity,
             ))
 
         # ── Point ─────────────────────────────────────────────────────────
-        elif _is_point(obj):
-            px, py, pz = _point_to_xyz(obj)
+        elif (adapter and adapter.is_point(obj)) or (adapter is None and _is_plain_point(obj)):
+            px, py, pz = adapter.point_to_xyz(obj) if adapter else _plain_point_to_xyz(obj)
             all_x.append(px)
             all_y.append(py)
             all_z.append(pz)
@@ -300,25 +207,12 @@ def _build_traces(objects, names, colors, opacity,
                 showlegend=True,
             ))
 
-        # ── CadQuery solid ────────────────────────────────────────────────
+        # ── Solid ─────────────────────────────────────────────────────────
         else:
-            vertices, triangles = obj.val().tessellate(tessellation_tolerance)
+            if adapter is None:
+                raise TypeError(f"Unrecognized object type for show(): {type(obj)!r}")
 
-            x  = []
-            y  = []
-            z  = []
-            for v in vertices:
-                x.append(v.x)
-                y.append(v.y)
-                z.append(v.z)
-
-            ii = []
-            jj = []
-            kk = []
-            for t in triangles:
-                ii.append(t[0])
-                jj.append(t[1])
-                kk.append(t[2])
+            x, y, z, ii, jj, kk = adapter.tessellate_solid(obj, tessellation_tolerance)
 
             all_x.extend(x)
             all_y.extend(y)
@@ -515,21 +409,25 @@ def show(
     lines_display=None,
 ):
     """
-    Display one or more CadQuery objects as an interactive 3D Plotly figure.
+    Display one or more CadQuery and/or build123d objects as an interactive
+    3D Plotly figure.
 
-    Accepts a mixed list of object types in any combination:
-      - CadQuery Workplane (solid)  → tessellated mesh
-      - cq.Edge / cq.Wire           → sampled line (works with straight lines,
+    Accepts a mixed list of object types in any combination, from either
+    library, in the same call:
+      - Solid (CadQuery Workplane / build123d Part, Sketch, Solid, Compound)
+                                    → tessellated mesh
+      - Edge / Wire                → sampled line (works with straight lines,
                                       arcs, ellipses, splines, helices, etc.)
-      - cq.Vector / [x, y, z]       → point marker
+      - Vector / [x, y, z]         → point marker
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
 
     Parameters
     ----------
-    objects                 : object or list — any mix of CadQuery Workplane,
-                              cq.Edge, cq.Wire, cq.Vector, or [x, y, z] lists
+    objects                 : object or list — any mix of CadQuery Workplane
+                              /Edge/Wire/Vector, build123d Part/Sketch/Curve/
+                              Edge/Wire/Vector, or [x, y, z] lists
     names                   : list of legend labels (optional)
     colors                  : list of face colors for mesh objects —
                               see https://plotly.com/python/css-colors/

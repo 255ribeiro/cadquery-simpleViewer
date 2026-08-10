@@ -1,7 +1,9 @@
-import cadquery as cq
 import plotly.graph_objects as go
 import pytest
 from unittest.mock import patch
+
+cq = pytest.importorskip("cadquery")
+b3d = pytest.importorskip("build123d")
 
 from cadquery_simpleviewer.viewer import (
     _build_traces,
@@ -9,13 +11,17 @@ from cadquery_simpleviewer.viewer import (
     _axis_style,
     _equal_ranges,
     _expand_for_plane,
-    _is_point,
-    _is_edge,
-    _is_wire,
-    _point_to_xyz,
-    _sample_edge,
-    _sample_wire,
+    _is_plain_point,
+    _plain_point_to_xyz,
     show,
+)
+from cadquery_simpleviewer.adapters.cadquery_adapter import (
+    is_point as _is_point,
+    is_edge as _is_edge,
+    is_wire as _is_wire,
+    point_to_xyz as _point_to_xyz,
+    sample_edge as _sample_edge,
+    sample_wire as _sample_wire,
 )
 
 
@@ -48,7 +54,10 @@ def arc_edge():
 
 @pytest.fixture
 def rect_wire():
-    return cq.Wire.makeRect(4.0, 2.0)
+    return cq.Wire.makePolygon(
+        [cq.Vector(-2, -1, 0), cq.Vector(2, -1, 0), cq.Vector(2, 1, 0), cq.Vector(-2, 1, 0)],
+        close=True,
+    )
 
 
 def _capture_fig(obj, **kwargs):
@@ -63,25 +72,28 @@ def _capture_fig(obj, **kwargs):
     return captured["fig"]
 
 
-# ── _is_point ────────────────────────────────────────────────────────────────
+# ── _is_point (cadquery adapter) ───────────────────────────────────────────────
 
 def test_is_point_vector():
     assert _is_point(cq.Vector(1, 2, 3)) == True
 
-def test_is_point_list():
-    assert _is_point([1.0, 2.0, 3.0]) == True
-
-def test_is_point_tuple():
-    assert _is_point((1, 2, 3)) == True
-
-def test_is_point_wrong_length():
-    assert _is_point([1.0, 2.0]) == False
-
-def test_is_point_wrong_type():
-    assert _is_point("abc") == False
-
 def test_is_point_workplane(box):
     assert _is_point(box) == False
+
+
+# ── _is_plain_point (library-agnostic, viewer.py) ──────────────────────────────
+
+def test_is_plain_point_list():
+    assert _is_plain_point([1.0, 2.0, 3.0]) == True
+
+def test_is_plain_point_tuple():
+    assert _is_plain_point((1, 2, 3)) == True
+
+def test_is_plain_point_wrong_length():
+    assert _is_plain_point([1.0, 2.0]) == False
+
+def test_is_plain_point_wrong_type():
+    assert _is_plain_point("abc") == False
 
 
 # ── _is_edge / _is_wire ───────────────────────────────────────────────────────
@@ -105,18 +117,21 @@ def test_is_wire_with_workplane(box):
     assert _is_wire(box) == False
 
 
-# ── _point_to_xyz ─────────────────────────────────────────────────────────────
+# ── _point_to_xyz (cadquery adapter) ────────────────────────────────────────────
 
 def test_point_to_xyz_vector():
     x, y, z = _point_to_xyz(cq.Vector(1.0, 2.0, 3.0))
     assert (x, y, z) == (1.0, 2.0, 3.0)
 
-def test_point_to_xyz_list():
-    x, y, z = _point_to_xyz([4.0, 5.0, 6.0])
+
+# ── _plain_point_to_xyz (library-agnostic, viewer.py) ───────────────────────────
+
+def test_plain_point_to_xyz_list():
+    x, y, z = _plain_point_to_xyz([4.0, 5.0, 6.0])
     assert (x, y, z) == (4.0, 5.0, 6.0)
 
-def test_point_to_xyz_returns_floats():
-    x, y, z = _point_to_xyz([1, 2, 3])
+def test_plain_point_to_xyz_returns_floats():
+    x, y, z = _plain_point_to_xyz([1, 2, 3])
     assert isinstance(x, float)
 
 
@@ -299,6 +314,12 @@ def test_show_runs_with_vector(vec):
 def test_show_runs_mixed_all_types(box, straight_edge, rect_wire, vec):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
         show([box, straight_edge, rect_wire, vec])
+
+def test_show_runs_mixed_cadquery_and_build123d(box):
+    with b3d.BuildPart() as bp:
+        b3d.Box(4, 4, 4)
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show([box, bp.part], names=["CadQuery box", "build123d box"])
 
 def test_show_lines_display_accepted(straight_edge):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):

@@ -1,13 +1,13 @@
 # cadquery-simpleViewer
 
-An interactive 3D viewer for [CadQuery](https://github.com/CadQuery/cadquery) models, built on [Plotly](https://plotly.com/python/). Renders geometry directly inside Jupyter notebooks and Google Colab cells — no external software, no extensions, no server required.
+An interactive 3D viewer for [CadQuery](https://github.com/CadQuery/cadquery) and [build123d](https://github.com/gumyr/build123d) models, built on [Plotly](https://plotly.com/python/). Renders geometry directly inside Jupyter notebooks and Google Colab cells — no external software, no extensions, no server required.
 
 ---
 
 ## Features
 
 - Interactive orbit, zoom and pan inside the notebook cell
-- Supports CadQuery solids, edges, wires, `cq.Vector` points, and `[x, y, z]` lists — mixed in the same call
+- Supports CadQuery `Workplane`/`Edge`/`Wire`/`Vector`, build123d `Part`/`Sketch`/`Curve`/`Edge`/`Wire`/`Vector`, and `[x, y, z]` lists — mixed freely in the same call, even across both libraries at once
 - Edge and wire rendering works with any curve type: straight lines, arcs, ellipses, splines, helices, B-splines
 - Axes visibility toggles (X, Y, Z independently)
 - Camera mode selector (Perspective / Orthographic)
@@ -43,7 +43,15 @@ pixi add --pypi cadquery-simpleviewer
 poetry add cadquery-simpleviewer
 ```
 
-> **Note**: `cadquery-simpleviewer` declares `plotly` as a dependency but intentionally does not pin `cadquery` itself — users typically manage their CadQuery installation separately (pip, conda, or the `cadquery` conda channel via pixi). See the [CadQuery installation guide](https://cadquery.readthedocs.io/en/latest/installation.html) for details.
+> **Note**: `cadquery-simpleviewer` declares `plotly` as a dependency but intentionally does not require `cadquery` or `build123d` themselves — install whichever library (or both) you use, via the `cadquery`, `build123d`, or `all` extras:
+>
+> ```bash
+> pip install "cadquery-simpleviewer[cadquery]"
+> pip install "cadquery-simpleviewer[build123d]"
+> pip install "cadquery-simpleviewer[all]"       # both
+> ```
+>
+> Requires Python 3.11+ (matching the minimum supported by current CadQuery and build123d releases). See the [CadQuery installation guide](https://cadquery.readthedocs.io/en/latest/installation.html) or the [build123d installation guide](https://build123d.readthedocs.io/en/latest/installation.html) for details on installing each library itself.
 
 ---
 
@@ -55,6 +63,33 @@ from cadquery_simpleviewer import show
 
 box = cq.Workplane("XY").box(5, 3, 2)
 show(box)
+```
+
+### Quick Start (build123d)
+
+```python
+from build123d import BuildPart, Box
+from cadquery_simpleviewer import show
+
+with BuildPart() as bp:
+    Box(5, 3, 2)
+
+show(bp.part)
+```
+
+CadQuery and build123d objects can be mixed freely in the same `show()` call:
+
+```python
+import cadquery as cq
+from build123d import BuildPart, Box
+from cadquery_simpleviewer import show
+
+cq_box = cq.Workplane("XY").box(5, 3, 2)
+
+with BuildPart() as bp:
+    Box(4, 4, 4)
+
+show([cq_box, bp.part], names=["CadQuery box", "build123d box"])
 ```
 
 ### Multiple objects with names and colors
@@ -99,12 +134,17 @@ show(
 
 ## Displaying Edges and Wires
 
-`show()` accepts `cq.Edge` and `cq.Wire` objects alongside solids. Any curve type is supported — the geometry is sampled along the curve using `positionAt(t)`, so the result faithfully follows arcs, splines, helices, and B-splines.
+`show()` accepts `Edge` and `Wire` objects (from either library) alongside solids. Any curve type is supported — the geometry is sampled along the curve (`positionAt(t)` for CadQuery, `position_at(t)` for build123d), so the result faithfully follows arcs, splines, helices, and B-splines.
 
 ### Straight edge
 
 ```python
 edge = cq.Edge.makeLine(cq.Vector(0, 0, 0), cq.Vector(5, 0, 0))
+show(edge)
+
+# build123d equivalent
+from build123d import Edge
+edge = Edge.make_line((0, 0, 0), (5, 0, 0))
 show(edge)
 ```
 
@@ -112,6 +152,10 @@ show(edge)
 
 ```python
 arc = cq.Edge.makeCircle(radius=3.0)
+show(arc, lines_display=dict(color="steelblue", width=3, samples=100))
+
+# build123d equivalent
+arc = Edge.make_circle(radius=3.0)
 show(arc, lines_display=dict(color="steelblue", width=3, samples=100))
 ```
 
@@ -127,7 +171,10 @@ show(helix, lines_display=dict(color="seagreen", samples=200))
 ```python
 box  = cq.Workplane("XY").box(5, 3, 2)
 arc  = cq.Edge.makeCircle(radius=4.0)
-wire = cq.Wire.makeRect(6.0, 4.0)
+wire = cq.Wire.makePolygon(
+    [cq.Vector(-3, -2, 0), cq.Vector(3, -2, 0), cq.Vector(3, 2, 0), cq.Vector(-3, 2, 0)],
+    close=True,
+)
 
 show(
     [box, arc, wire],
@@ -167,7 +214,7 @@ show(
 
 ## Displaying Points
 
-`show()` accepts `cq.Vector` objects and `[x, y, z]` lists alongside any other object type. Points are rendered as `Scatter3d` markers — no tessellation involved.
+`show()` accepts `cq.Vector`/build123d `Vector` objects and `[x, y, z]` lists alongside any other object type. Points are rendered as `Scatter3d` markers — no tessellation involved.
 
 ### Single point
 
@@ -176,6 +223,10 @@ show(cq.Vector(2.5, 0, 1))
 
 # List notation
 show([2.5, 0, 1])
+
+# build123d equivalent
+from build123d import Vector
+show(Vector(2.5, 0, 1))
 ```
 
 ### Points from edge division
@@ -228,7 +279,9 @@ Install at the top of the notebook, then use normally:
 import sys
 IN_COLAB = "google.colab" in sys.modules
 if IN_COLAB:
-    !pip install cadquery cadquery-simpleviewer
+    !pip install "cadquery-simpleviewer[cadquery]"
+    # or: !pip install "cadquery-simpleviewer[build123d]"
+    # or: !pip install "cadquery-simpleviewer[all]"
 
 import cadquery as cq
 from cadquery_simpleviewer import show
@@ -265,7 +318,7 @@ show(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `objects` | object or list | — | Any mix of CadQuery `Workplane`, `cq.Edge`, `cq.Wire`, `cq.Vector`, or `[x, y, z]` lists |
+| `objects` | object or list | — | Any mix of CadQuery `Workplane`/`Edge`/`Wire`/`Vector`, build123d `Part`/`Sketch`/`Curve`/`Edge`/`Wire`/`Vector`, or `[x, y, z]` lists — objects from both libraries can be mixed in one call |
 | `names` | list of str | `None` | Legend label for each object. Defaults to `"Object 1"`, `"Object 2"`, … |
 | `colors` | list of str | `None` | Face color for each mesh object. Accepts CSS color names and hex. See [Plotly CSS colors](https://plotly.com/python/css-colors/). Defaults to a built-in palette |
 | `opacity` | float | `1.0` | Surface opacity for mesh objects. `1.0` = fully opaque |

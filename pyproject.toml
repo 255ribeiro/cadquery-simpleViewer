@@ -1,14 +1,14 @@
 [project]
 name = "cadquery-simpleviewer"
 version = "0.2.3"
-description = "A simple interactive 3D viewer for CadQuery models using Plotly"
+description = "A simple interactive 3D viewer for CadQuery and build123d models using Plotly"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Fernando Ferraz Ribeiro", email = "ffribeiro@gmail.com" }
 ]
-keywords = ["cadquery", "3d", "visualization", "plotly", "architecture"]
+keywords = ["cadquery", "build123d", "3d", "visualization", "plotly", "architecture"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -27,7 +27,9 @@ Documentation = "https://github.com/255ribeiro/cadquery-simpleViewer"
 "Bug Tracker" = "https://github.com/255ribeiro/cadquery-simpleViewer/issues"
 
 [project.optional-dependencies]
-cadquery = ["cadquery>=2.3.0"]
+cadquery = ["cadquery>=2.8.0"]
+build123d = ["build123d>=0.11.0"]
+all = ["cadquery-simpleviewer[cadquery,build123d]"]
 
 [build-system]
 requires = ["hatchling"]
@@ -38,6 +40,8 @@ line-length = 100
 
 [dependency-groups]
 dev = [
+    "build123d>=0.11.1",
+    "cadquery>=2.8.0",
     "pytest-cov>=7.0.0",
     "taskipy>=1.14.1",
 ]
