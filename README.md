@@ -273,15 +273,16 @@ show(
 
 ## Google Colab
 
-Install at the top of the notebook, then use normally:
+### Using CadQuery — no restart needed
+
+CadQuery has no `ipython` dependency, so installing the `cadquery` extra never
+touches Colab's preinstalled packages:
 
 ```python
 import sys
 IN_COLAB = "google.colab" in sys.modules
 if IN_COLAB:
-    !pip install "cadquery-simpleviewer[cadquery]"
-    # or: !pip install "cadquery-simpleviewer[build123d]"
-    # or: !pip install "cadquery-simpleviewer[all]"
+    !pip install -q "cadquery-simpleviewer[cadquery]"
 
 import cadquery as cq
 from cadquery_simpleviewer import show
@@ -289,6 +290,47 @@ from cadquery_simpleviewer import show
 box = cq.Workplane("XY").box(5, 3, 2)
 show(box)
 ```
+
+### Using build123d — requires one runtime restart
+
+`build123d` requires a newer `ipython` than the one Colab ships with, so
+`pip install "cadquery-simpleviewer[build123d]"` (or `[all]`) upgrades
+`ipython` in place. Colab always requires a runtime restart after that
+happens — otherwise the notebook keeps running against the old, now-mismatched
+IPython internals and looks broken/"stuck." This is expected Colab behavior,
+not a bug in this package.
+
+Use this cell to install and restart automatically — just run it once, wait
+for the runtime to reconnect, then run it (or the whole notebook) again:
+
+```python
+import sys, os
+
+IN_COLAB = "google.colab" in sys.modules
+if IN_COLAB:
+    import subprocess
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q",
+         "cadquery-simpleviewer[build123d]"],
+        check=True,
+    )
+    # build123d needs a newer ipython than Colab ships with by default.
+    # Restart the runtime once so the upgraded ipython actually loads,
+    # then re-run this cell/notebook.
+    os.kill(os.getpid(), 9)
+
+from build123d import BuildPart, Box
+from cadquery_simpleviewer import show
+
+with BuildPart() as bp:
+    Box(5, 3, 2)
+
+show(bp.part)
+```
+
+The second run (after the restart) finds everything already installed at the
+right version, so it installs nothing and doesn't restart again — safe to
+leave in the notebook.
 
 The viewer renders inline as an interactive Plotly figure. No extensions or widget managers are needed.
 
