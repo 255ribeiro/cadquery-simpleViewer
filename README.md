@@ -291,20 +291,25 @@ box = cq.Workplane("XY").box(5, 3, 2)
 show(box)
 ```
 
-### Using build123d — requires one runtime restart
+### Using build123d — do not restart the runtime
 
-`build123d` requires a newer `ipython` than the one Colab ships with, so
-`pip install "cadquery-simpleviewer[build123d]"` (or `[all]`) upgrades
-`ipython` in place. Colab always requires a runtime restart after that
-happens — otherwise the notebook keeps running against the old, now-mismatched
-IPython internals and looks broken/"stuck." This is expected Colab behavior,
-not a bug in this package.
+`build123d` requires a newer `ipython` than the one Colab ships with, so a
+plain `pip install "cadquery-simpleviewer[build123d]"` (or `[all]`) upgrades
+`ipython` in place. **Do not restart the runtime after that.** Colab's own
+kernel bootstrap (`google.colab._shell_customizations`) is only compatible
+with the IPython version Colab ships by default — starting a new kernel on
+top of the upgraded IPython fails immediately, and it fails on *every*
+subsequent restart too, since the working version is no longer on disk. At
+that point the only way back is "Disconnect and delete runtime" (a fresh VM).
 
-Use this cell to install and restart automatically — just run it once, wait
-for the runtime to reconnect, then run it (or the whole notebook) again:
+The fix is to immediately pin `ipython` back down after installing, without
+restarting. The already-running kernel keeps using the IPython it already
+loaded into memory, so nothing in your current session breaks — and putting
+the compatible version back on disk means a future restart (e.g. if Colab
+recycles the runtime) won't hit the broken code path either:
 
 ```python
-import sys, os
+import sys
 
 IN_COLAB = "google.colab" in sys.modules
 if IN_COLAB:
@@ -314,10 +319,14 @@ if IN_COLAB:
          "cadquery-simpleviewer[build123d]"],
         check=True,
     )
-    # build123d needs a newer ipython than Colab ships with by default.
-    # Restart the runtime once so the upgraded ipython actually loads,
-    # then re-run this cell/notebook.
-    os.kill(os.getpid(), 9)
+    # build123d pulls in a newer ipython than Colab's kernel bootstrap
+    # tolerates. Put Colab's version back on disk — do NOT restart the
+    # runtime, the current kernel already has the working ipython loaded.
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q",
+         "ipython==7.34.0", "--no-deps"],
+        check=True,
+    )
 
 from build123d import BuildPart, Box
 from cadquery_simpleviewer import show
@@ -328,9 +337,8 @@ with BuildPart() as bp:
 show(bp.part)
 ```
 
-The second run (after the restart) finds everything already installed at the
-right version, so it installs nothing and doesn't restart again — safe to
-leave in the notebook.
+Running this cell again later in the same session just reinstalls the same
+pinned versions — safe to leave in the notebook.
 
 The viewer renders inline as an interactive Plotly figure. No extensions or widget managers are needed.
 
