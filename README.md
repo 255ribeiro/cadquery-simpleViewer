@@ -327,7 +327,10 @@ if IN_COLAB:
          "ipython==7.34.0", "--no-deps"],
         check=True,
     )
+else:
+    print("Not running in Colab, skipping package installation.")
 
+# testing instalation
 from build123d import BuildPart, Box
 from cadquery_simpleviewer import show
 
