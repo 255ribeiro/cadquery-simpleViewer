@@ -330,6 +330,12 @@ if IN_COLAB:
 else:
     print("Not running in Colab, skipping package installation.")
 
+
+```
+
+#### Testing installation
+
+```python
 # testing installation
 from build123d import BuildPart, Box
 from cadquery_simpleviewer import show
