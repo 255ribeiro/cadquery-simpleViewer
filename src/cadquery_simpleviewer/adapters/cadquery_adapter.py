@@ -98,14 +98,14 @@ def sample_wire(wire, samples):
     return x, y, z
 
 
-def tessellate_solid(obj, tolerance):
+def tessellate_solid(obj, tolerance, angular_tolerance=0.1):
     """
     Tessellate a CadQuery Workplane solid into Plotly-ready primitives.
 
     Returns (x, y, z, i, j, k) — vertex coordinate lists and triangle
     index lists, ready to hand straight to go.Mesh3d.
     """
-    vertices, triangles = obj.val().tessellate(tolerance)
+    vertices, triangles = obj.val().tessellate(tolerance, angular_tolerance)
 
     x = [v.x for v in vertices]
     y = [v.y for v in vertices]

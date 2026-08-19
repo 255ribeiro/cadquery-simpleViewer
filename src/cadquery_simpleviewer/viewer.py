@@ -100,7 +100,8 @@ def _axes_from_string(visible_axes):
 # ── trace building ────────────────────────────────────────────────────────────
 
 def _build_traces(objects, names, colors, opacity,
-                  tessellation_tolerance, points_display, lines_display):
+                  tessellation_tolerance, points_display, lines_display,
+                  angular_tolerance=0.1, flat_shading=False):
     """
     Build Plotly traces from a mixed list of CadQuery and/or build123d objects.
 
@@ -212,7 +213,9 @@ def _build_traces(objects, names, colors, opacity,
             if adapter is None:
                 raise TypeError(f"Unrecognized object type for show(): {type(obj)!r}")
 
-            x, y, z, ii, jj, kk = adapter.tessellate_solid(obj, tessellation_tolerance)
+            x, y, z, ii, jj, kk = adapter.tessellate_solid(
+                obj, tessellation_tolerance, angular_tolerance
+            )
 
             all_x.extend(x)
             all_y.extend(y)
@@ -230,7 +233,7 @@ def _build_traces(objects, names, colors, opacity,
                 color=color,
                 opacity=opacity,
                 name=name,
-                flatshading=True,
+                flatshading=flat_shading,
                 showlegend=True,
                 lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
             ))
@@ -404,6 +407,8 @@ def show(
     plane_size=50,
     plane_opacity=0.8,
     tessellation_tolerance=0.01,
+    angular_tolerance=0.1,
+    flat_shading=False,
     padding=0.15,
     points_display=None,
     lines_display=None,
@@ -438,7 +443,16 @@ def show(
     plane_color             : color of the base plane
     plane_size              : half-side length of the base plane quad
     plane_opacity           : opacity of the base plane
-    tessellation_tolerance  : mesh precision — smaller = finer, slower
+    tessellation_tolerance  : mesh precision (linear deflection) — smaller = finer, slower
+    angular_tolerance       : mesh precision on curved surfaces, in radians —
+                              smaller = smoother curves/fillets, slower.
+                              Lower this (e.g. 0.05) if curved faces near a
+                              boolean cut look faceted or moiré-patterned.
+    flat_shading            : True = one flat normal per triangle (faceted,
+                              low-poly look); False = smooth per-vertex
+                              normals within each face (default) — fixes the
+                              dark moiré patches that flat shading produces
+                              on curved faces introduced by boolean ops.
     padding                 : fraction of bounding box span added as axis margin
     points_display          : dict to configure point markers. Keys (all optional):
                                 size    — marker size in pixels (default 5)
@@ -459,7 +473,8 @@ def show(
 
     traces, all_x, all_y, all_z = _build_traces(
         objects, names, colors, opacity,
-        tessellation_tolerance, points_display, lines_display
+        tessellation_tolerance, points_display, lines_display,
+        angular_tolerance=angular_tolerance, flat_shading=flat_shading
     )
 
     if z is not None:

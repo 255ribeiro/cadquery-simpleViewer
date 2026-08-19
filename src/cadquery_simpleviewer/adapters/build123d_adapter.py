@@ -91,13 +91,13 @@ def sample_wire(wire, samples):
     return x, y, z
 
 
-def tessellate_solid(obj, tolerance):
+def tessellate_solid(obj, tolerance, angular_tolerance=0.1):
     """
     Tessellate a build123d Part/Sketch/Solid/Compound into Plotly-ready
     primitives. Returns (x, y, z, i, j, k), ready to hand straight to
     go.Mesh3d.
     """
-    vertices, triangles = obj.tessellate(tolerance)
+    vertices, triangles = obj.tessellate(tolerance, angular_tolerance)
 
     x = [v.X for v in vertices]
     y = [v.Y for v in vertices]
