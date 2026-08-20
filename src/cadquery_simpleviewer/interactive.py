@@ -80,8 +80,21 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
     a chart inside an Output widget otherwise.
 
     The decorated function is expected to accept the same keyword names
-    given in **controls and return the object(s) show()/_build_figure()
-    already accepts (a single CadQuery/build123d object, or a list of them).
+    given in **controls, and return either:
+      - the object(s) show()/_build_figure() already accepts (a single
+        CadQuery/build123d object, or a list of them) — rendered with the
+        show_kwargs given here, or
+      - a dict with an "objects" key (the object(s) to render, same as
+        above) plus any other _build_figure()/show() parameter name
+        (colors, opacity, z, ...) to override show_kwargs for that one
+        render only, e.g. to flag invalid geometry:
+
+            @interactive(radius=(1, 9), show_kwargs=dict(colors=["steelblue"]))
+            def model(radius):
+                box = cq.Workplane("XY").box(10, 10, 2)
+                if radius >= 5:
+                    return {"objects": box, "colors": ["indianred"]}
+                return box
 
     Applying the decorator immediately builds the sliders, renders the
     initial figure, and displays both in the current cell's output — no
@@ -161,16 +174,36 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
             # nested Output widgets can end up sharing the same frontend
             # routing id, so the figure renders into the hidden one instead
             # of the one actually shown on screen.
+            result = build_fn(**values)
+
+            if isinstance(result, dict):
+                if "objects" not in result:
+                    raise ValueError(
+                        "a dict returned by the decorated function must "
+                        "include an 'objects' key with the object(s) to render"
+                    )
+                overrides = {k: v for k, v in result.items() if k != "objects"}
+                unknown = sorted(set(overrides) - set(figure_kwargs))
+                if unknown:
+                    raise ValueError(
+                        f"unknown show() parameter(s) in returned dict: {unknown}"
+                    )
+                call_kwargs = {**figure_kwargs, **overrides}
+                objects = result["objects"]
+            else:
+                call_kwargs = figure_kwargs
+                objects = result
+
             fig = _build_figure(
-                build_fn(**values),
-                figure_kwargs["names"], figure_kwargs["colors"],
-                figure_kwargs["opacity"], figure_kwargs["visible_axes"],
-                figure_kwargs["z"], figure_kwargs["plane_color"],
-                figure_kwargs["plane_size"], figure_kwargs["plane_opacity"],
-                figure_kwargs["tessellation_tolerance"],
-                figure_kwargs["angular_tolerance"],
-                figure_kwargs["flat_shading"], figure_kwargs["padding"],
-                figure_kwargs["points_display"], figure_kwargs["lines_display"],
+                objects,
+                call_kwargs["names"], call_kwargs["colors"],
+                call_kwargs["opacity"], call_kwargs["visible_axes"],
+                call_kwargs["z"], call_kwargs["plane_color"],
+                call_kwargs["plane_size"], call_kwargs["plane_opacity"],
+                call_kwargs["tessellation_tolerance"],
+                call_kwargs["angular_tolerance"],
+                call_kwargs["flat_shading"], call_kwargs["padding"],
+                call_kwargs["points_display"], call_kwargs["lines_display"],
             )
             fig.show()
 

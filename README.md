@@ -403,6 +403,17 @@ def model(width):
     return cq.Workplane("XY").box(width, 3, 2)
 ```
 
+To override display options on a *specific* render — e.g. to flag invalid geometry — return a dict instead of the bare object(s). It must include an `"objects"` key (the object(s) to render, same as a plain return), and any other key must match a `show()` parameter name; those override `show_kwargs` for that render only, leaving `show_kwargs` itself untouched for the next one:
+
+```python
+@interactive(radius=(1, 9), show_kwargs=dict(colors=["steelblue"]))
+def model(radius):
+    box = cq.Workplane("XY").box(10, 10, 2)
+    if radius >= 5:
+        return {"objects": box, "colors": ["indianred"]}  # radius too big for this box
+    return box
+```
+
 By default sliders rebuild the model **on release**, not on every drag tick — a CAD rebuild plus re-tessellation isn't instant, so live-per-tick updates can lag or queue up on nontrivial geometry. Pass `continuous_update=True` for live updates while dragging, best suited to cheap/fast geometry:
 
 ```python

@@ -110,6 +110,67 @@ def test_interactive_show_kwargs_forwarded():
     assert mesh_traces[0].color == "indianred"
 
 
+# ── dict return overrides ───────────────────────────────────────────────────
+
+def _spy_last_figure():
+    """Patch go.Figure to capture the most recently built Figure, returning
+    the dict of captured state and the unittest.mock.patch context manager."""
+    captured = {}
+    original_figure = go.Figure
+
+    def spy_figure(*args, **kwargs):
+        fig = original_figure(*args, **kwargs)
+        captured["fig"] = fig
+        return fig
+
+    return captured, patch("cadquery_simpleviewer.viewer.go.Figure", side_effect=spy_figure)
+
+
+def test_interactive_dict_return_overrides_show_kwargs():
+    captured, spy = _spy_last_figure()
+
+    with spy:
+        @interactive(radius=(1, 9, 1, 5), show_kwargs=dict(colors=["steelblue"]))
+        def model(radius):
+            box = cq.Workplane("XY").box(10, 10, 2)
+            if radius >= 5:
+                return {"objects": box, "colors": ["indianred"]}
+            return box
+
+    mesh_traces = [t for t in captured["fig"].data if isinstance(t, go.Mesh3d)]
+    assert mesh_traces[0].color == "indianred"
+
+
+def test_interactive_plain_return_still_uses_show_kwargs():
+    captured, spy = _spy_last_figure()
+
+    with spy:
+        @interactive(radius=(1, 9, 1, 2), show_kwargs=dict(colors=["steelblue"]))
+        def model(radius):
+            box = cq.Workplane("XY").box(10, 10, 2)
+            if radius >= 5:
+                return {"objects": box, "colors": ["indianred"]}
+            return box
+
+    mesh_traces = [t for t in captured["fig"].data if isinstance(t, go.Mesh3d)]
+    assert mesh_traces[0].color == "steelblue"
+
+
+def test_interactive_dict_without_objects_key_raises():
+    with pytest.raises(ValueError, match="objects"):
+        @interactive(radius=(1, 9, 1, 5))
+        def model(radius):
+            return {"colors": ["indianred"]}
+
+
+def test_interactive_dict_with_unknown_key_raises():
+    with pytest.raises(ValueError, match="unknown"):
+        @interactive(radius=(1, 9, 1, 5))
+        def model(radius):
+            box = cq.Workplane("XY").box(10, 10, 2)
+            return {"objects": box, "not_a_real_param": 123}
+
+
 # ── Colab custom widget manager ────────────────────────────────────────────
 
 def test_interactive_skips_colab_setup_outside_colab():
