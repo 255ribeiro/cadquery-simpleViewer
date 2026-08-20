@@ -4,11 +4,10 @@ from .viewer import _build_figure
 
 try:
     import ipywidgets as widgets
-    from IPython.display import display, clear_output
+    from IPython.display import display
 except ImportError:
     widgets = None
     display = None
-    clear_output = None
 
 
 def _make_slider(widgets, name, spec):
@@ -136,25 +135,27 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                 slider.continuous_update = continuous_update
             sliders[name] = slider
 
-        output = widgets.Output()
-
         def _redraw(**values):
-            with output:
-                clear_output(wait=True)
-                fig = _build_figure(
-                    build_fn(**values),
-                    figure_kwargs["names"], figure_kwargs["colors"],
-                    figure_kwargs["opacity"], figure_kwargs["visible_axes"],
-                    figure_kwargs["z"], figure_kwargs["plane_color"],
-                    figure_kwargs["plane_size"], figure_kwargs["plane_opacity"],
-                    figure_kwargs["tessellation_tolerance"],
-                    figure_kwargs["angular_tolerance"],
-                    figure_kwargs["flat_shading"], figure_kwargs["padding"],
-                    figure_kwargs["points_display"], figure_kwargs["lines_display"],
-                )
-                fig.show()
+            # Runs inside the Output widget interactive_output() manages
+            # (clear_output(wait=True) + capture already handled there) —
+            # do not wrap this in a second, separately-displayed Output;
+            # nested Output widgets can end up sharing the same frontend
+            # routing id, so the figure renders into the hidden one instead
+            # of the one actually shown on screen.
+            fig = _build_figure(
+                build_fn(**values),
+                figure_kwargs["names"], figure_kwargs["colors"],
+                figure_kwargs["opacity"], figure_kwargs["visible_axes"],
+                figure_kwargs["z"], figure_kwargs["plane_color"],
+                figure_kwargs["plane_size"], figure_kwargs["plane_opacity"],
+                figure_kwargs["tessellation_tolerance"],
+                figure_kwargs["angular_tolerance"],
+                figure_kwargs["flat_shading"], figure_kwargs["padding"],
+                figure_kwargs["points_display"], figure_kwargs["lines_display"],
+            )
+            fig.show()
 
-        widgets.interactive_output(_redraw, sliders)
+        output = widgets.interactive_output(_redraw, sliders)
 
         display(widgets.VBox([widgets.VBox(list(sliders.values())), output]))
 

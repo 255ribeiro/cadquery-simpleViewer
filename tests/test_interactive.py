@@ -12,11 +12,9 @@ from cadquery_simpleviewer.interactive import interactive, _make_slider
 
 @pytest.fixture(autouse=True)
 def _no_display():
-    """Every test patches display/clear_output so nothing tries to touch
-    a real IPython frontend, and patches go.Figure.show so no browser
-    tab is opened."""
+    """Every test patches display so nothing tries to touch a real IPython
+    frontend, and patches go.Figure.show so no browser tab is opened."""
     with patch("cadquery_simpleviewer.interactive.display") as mock_display, \
-         patch("cadquery_simpleviewer.interactive.clear_output"), \
          patch("cadquery_simpleviewer.viewer.go.Figure.show"):
         yield mock_display
 
