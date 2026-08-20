@@ -29,7 +29,8 @@ Documentation = "https://github.com/255ribeiro/cadquery-simpleViewer"
 [project.optional-dependencies]
 cadquery = ["cadquery>=2.8.0"]
 build123d = ["build123d>=0.11.0"]
-all = ["cadquery-simpleviewer[cadquery,build123d]"]
+interactive = ["ipywidgets>=7.0"]
+all = ["cadquery-simpleviewer[cadquery,build123d,interactive]"]
 
 [build-system]
 requires = ["hatchling"]
@@ -42,6 +43,7 @@ line-length = 100
 dev = [
     "build123d>=0.11.1",
     "cadquery>=2.8.0",
+    "ipywidgets>=7.0",
     "pytest-cov>=7.0.0",
     "taskipy>=1.14.1",
 ]
