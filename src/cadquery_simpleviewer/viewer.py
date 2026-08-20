@@ -394,6 +394,98 @@ def _make_camera_menu(x_pos):
     )
 
 
+# ── figure building ──────────────────────────────────────────────────────────
+
+def _build_figure(
+    objects,
+    names,
+    colors,
+    opacity,
+    visible_axes,
+    z,
+    plane_color,
+    plane_size,
+    plane_opacity,
+    tessellation_tolerance,
+    angular_tolerance,
+    flat_shading,
+    padding,
+    points_display,
+    lines_display,
+):
+    """
+    Build a go.Figure from a mixed list of CadQuery and/or build123d objects.
+
+    Contains all the layout/trace-building logic shared by show() and the
+    interactive() decorator, so both produce an identically configured
+    figure — the only difference is what happens to it afterwards
+    (fig.show() vs. redrawing it into an ipywidgets.Output on every slider
+    change).
+    """
+    show_x, show_y, show_z = _axes_from_string(visible_axes)
+
+    traces, all_x, all_y, all_z = _build_traces(
+        objects, names, colors, opacity,
+        tessellation_tolerance, points_display, lines_display,
+        angular_tolerance=angular_tolerance, flat_shading=flat_shading
+    )
+
+    if z is not None:
+        traces.insert(0, _base_plane(
+            size=plane_size,
+            color=plane_color,
+            opacity=plane_opacity,
+            z=z
+        ))
+
+    xmin, xmax = min(all_x), max(all_x)
+    ymin, ymax = min(all_y), max(all_y)
+    zmin, zmax = min(all_z), max(all_z)
+
+    x_range, y_range, z_range = _equal_ranges(
+        xmin, xmax, ymin, ymax, zmin, zmax, padding
+    )
+
+    if z is not None:
+        x_range, y_range, z_range = _expand_for_plane(
+            x_range, y_range, z_range, plane_size, z
+        )
+
+    menu_x   = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
+    menu_y   = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
+    menu_z   = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
+    menu_cam = _make_camera_menu(x_pos=0.56)
+
+    annotations = [
+        dict(text="Axes:", x=-0.01, y=1.17, xref="paper", yref="paper",
+             showarrow=False, font=dict(size=11), xanchor="right"),
+        dict(text="Camera:", x=0.54,  y=1.17, xref="paper", yref="paper",
+             showarrow=False, font=dict(size=11), xanchor="right"),
+    ]
+
+    fig = go.Figure(data=traces)
+    fig.update_layout(
+        scene=dict(
+            aspectmode="manual",
+            aspectratio=_EQUAL_ASPECT,
+            xaxis=_axis_dict(show_x, x_range),
+            yaxis=_axis_dict(show_y, y_range),
+            zaxis=_axis_dict(show_z, z_range),
+            camera=dict(
+                projection=dict(type="perspective"),
+                eye=dict(x=1.5, y=1.5, z=1.5),
+                up=dict(x=0, y=0, z=1)
+            )
+        ),
+        updatemenus=[menu_x, menu_y, menu_z, menu_cam],
+        annotations=annotations,
+        legend=dict(x=0, y=1),
+        margin=dict(l=0, r=0, t=90, b=0)
+    )
+
+    return fig
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def show(
@@ -469,65 +561,10 @@ def show(
                                           helices, or complex splines.
                                 opacity — line opacity (default 1.0)
     """
-    show_x, show_y, show_z = _axes_from_string(visible_axes)
-
-    traces, all_x, all_y, all_z = _build_traces(
-        objects, names, colors, opacity,
-        tessellation_tolerance, points_display, lines_display,
-        angular_tolerance=angular_tolerance, flat_shading=flat_shading
+    fig = _build_figure(
+        objects, names, colors, opacity, visible_axes, z,
+        plane_color, plane_size, plane_opacity,
+        tessellation_tolerance, angular_tolerance, flat_shading,
+        padding, points_display, lines_display,
     )
-
-    if z is not None:
-        traces.insert(0, _base_plane(
-            size=plane_size,
-            color=plane_color,
-            opacity=plane_opacity,
-            z=z
-        ))
-
-    xmin, xmax = min(all_x), max(all_x)
-    ymin, ymax = min(all_y), max(all_y)
-    zmin, zmax = min(all_z), max(all_z)
-
-    x_range, y_range, z_range = _equal_ranges(
-        xmin, xmax, ymin, ymax, zmin, zmax, padding
-    )
-
-    if z is not None:
-        x_range, y_range, z_range = _expand_for_plane(
-            x_range, y_range, z_range, plane_size, z
-        )
-
-    menu_x   = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
-    menu_y   = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
-    menu_z   = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
-    menu_cam = _make_camera_menu(x_pos=0.56)
-
-    annotations = [
-        dict(text="Axes:", x=-0.01, y=1.17, xref="paper", yref="paper",
-             showarrow=False, font=dict(size=11), xanchor="right"),
-        dict(text="Camera:", x=0.54,  y=1.17, xref="paper", yref="paper",
-             showarrow=False, font=dict(size=11), xanchor="right"),
-    ]
-
-    fig = go.Figure(data=traces)
-    fig.update_layout(
-        scene=dict(
-            aspectmode="manual",
-            aspectratio=_EQUAL_ASPECT,
-            xaxis=_axis_dict(show_x, x_range),
-            yaxis=_axis_dict(show_y, y_range),
-            zaxis=_axis_dict(show_z, z_range),
-            camera=dict(
-                projection=dict(type="perspective"),
-                eye=dict(x=1.5, y=1.5, z=1.5),
-                up=dict(x=0, y=0, z=1)
-            )
-        ),
-        updatemenus=[menu_x, menu_y, menu_z, menu_cam],
-        annotations=annotations,
-        legend=dict(x=0, y=1),
-        margin=dict(l=0, r=0, t=90, b=0)
-    )
-
     fig.show()

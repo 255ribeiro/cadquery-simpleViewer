@@ -353,6 +353,83 @@ The viewer renders inline as an interactive Plotly figure. No extensions or widg
 
 ---
 
+## Sliders / Interactive Parameters
+
+Wrap a model-building function with `@interactive(...)` to control its parameters with sliders and re-render on every change — in JupyterLab, VS Code notebooks, and Google Colab alike. It's built entirely on core `ipywidgets` (sliders, `Output`) driving a normal `show()`-style Plotly render, so — like the rest of this library — it needs no extensions or custom widget managers, even in Colab.
+
+```python
+import cadquery as cq
+from cadquery_simpleviewer import interactive
+
+@interactive(width=(1, 10, 0.5, 5), height=(1, 8, 0.5, 3))
+def model(width, height):
+    return cq.Workplane("XY").box(width, height, 2)
+```
+
+Running that cell is enough — the sliders and the rendered model appear immediately, no separate call needed. `model` itself is returned unchanged by the decorator, so it can still be called directly like a normal function.
+
+Each keyword passed to `@interactive(...)` must match a parameter name of the decorated function, and its value is either a slider spec or a ready-made `ipywidgets` widget:
+
+```python
+@interactive(
+    width=(1, 10),              # (min, max)              — step defaults to 1 (int) or (max-min)/100
+    height=(1, 8, 0.5),         # (min, max, step)         — default value defaults to the midpoint
+    depth=(1, 5, 0.5, 2),       # (min, max, step, default)
+)
+def model(width, height, depth):
+    return cq.Workplane("XY").box(width, height, depth)
+```
+
+Pass an `ipywidgets` widget directly for anything beyond a plain slider (a `Dropdown`, `Checkbox`, etc.):
+
+```python
+import ipywidgets as widgets
+
+@interactive(shape=widgets.Dropdown(options=["box", "cylinder"], value="box"))
+def model(shape):
+    if shape == "box":
+        return cq.Workplane("XY").box(4, 4, 4)
+    return cq.Workplane("XY").cylinder(4, 2)
+```
+
+Display options (`colors`, `opacity`, `z`, `visible_axes`, etc. — the same keys `show()` accepts) go in a separate `show_kwargs` dict so they can never collide with a model parameter name:
+
+```python
+@interactive(
+    width=(1, 10, 0.5, 5),
+    show_kwargs=dict(colors=["steelblue"], z=0, plane_color="gainsboro"),
+)
+def model(width):
+    return cq.Workplane("XY").box(width, 3, 2)
+```
+
+To override display options on a *specific* render — e.g. to flag invalid geometry — return a dict instead of the bare object(s). It must include an `"objects"` key (the object(s) to render, same as a plain return), and any other key must match a `show()` parameter name; those override `show_kwargs` for that render only, leaving `show_kwargs` itself untouched for the next one:
+
+```python
+@interactive(radius=(1, 9), show_kwargs=dict(colors=["steelblue"]))
+def model(radius):
+    box = cq.Workplane("XY").box(10, 10, 2)
+    if radius >= 5:
+        return {"objects": box, "colors": ["indianred"]}  # radius too big for this box
+    return box
+```
+
+By default sliders rebuild the model **on release**, not on every drag tick — a CAD rebuild plus re-tessellation isn't instant, so live-per-tick updates can lag or queue up on nontrivial geometry. Pass `continuous_update=True` for live updates while dragging, best suited to cheap/fast geometry:
+
+```python
+@interactive(width=(1, 10), continuous_update=True)
+def model(width):
+    return cq.Workplane("XY").box(width, 3, 2)
+```
+
+`interactive()` requires `ipywidgets`, installed via the `interactive` extra (or included in `[all]`):
+
+```bash
+pip install "cadquery-simpleviewer[interactive]"
+```
+
+---
+
 ## `show()` Reference
 
 ```python
