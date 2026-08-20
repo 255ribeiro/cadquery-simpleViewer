@@ -1,7 +1,10 @@
+import sys
+import types
+
 import ipywidgets as widgets
 import plotly.graph_objects as go
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 cq = pytest.importorskip("cadquery")
 
@@ -105,6 +108,39 @@ def test_interactive_show_kwargs_forwarded():
 
     mesh_traces = [t for t in captured["fig"].data if isinstance(t, go.Mesh3d)]
     assert mesh_traces[0].color == "indianred"
+
+
+# ── Colab custom widget manager ────────────────────────────────────────────
+
+def test_interactive_skips_colab_setup_outside_colab():
+    assert "google.colab" not in sys.modules
+
+    @interactive(width=(1, 10))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+    # No google.colab module present, so nothing to assert on directly —
+    # this just documents/guards that decorating outside Colab doesn't
+    # try to import google.colab and blow up.
+
+
+def test_interactive_enables_colab_custom_widget_manager(monkeypatch):
+    fake_output = MagicMock()
+    fake_colab_output_module = types.ModuleType("google.colab.output")
+    fake_colab_output_module.enable_custom_widget_manager = fake_output
+    fake_colab_module = types.ModuleType("google.colab")
+    fake_colab_module.output = fake_colab_output_module
+    fake_google_module = types.ModuleType("google")
+    fake_google_module.colab = fake_colab_module
+
+    monkeypatch.setitem(sys.modules, "google", fake_google_module)
+    monkeypatch.setitem(sys.modules, "google.colab", fake_colab_module)
+    monkeypatch.setitem(sys.modules, "google.colab.output", fake_colab_output_module)
+
+    @interactive(width=(1, 10))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    fake_output.assert_called_once_with()
 
 
 def test_interactive_missing_ipywidgets_raises_import_error():

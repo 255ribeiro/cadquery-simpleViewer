@@ -1,4 +1,5 @@
 import inspect
+import sys
 
 from .viewer import _build_figure
 
@@ -8,6 +9,21 @@ try:
 except ImportError:
     widgets = None
     display = None
+
+
+def _enable_colab_custom_widget_manager():
+    """
+    Google Colab renders ipywidgets through its own frontend, which only
+    executes third-party JS content (like the <script> Plotly injects to
+    draw a chart) inside an Output widget once the custom widget manager
+    is enabled — without it, sliders render fine but the Output stays
+    visually empty even though the figure was captured into it. This is a
+    no-op outside Colab.
+    """
+    if "google.colab" not in sys.modules:
+        return
+    from google.colab import output as colab_output
+    colab_output.enable_custom_widget_manager()
 
 
 def _make_slider(widgets, name, spec):
@@ -57,8 +73,11 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
     """
     Decorator that turns a CAD model-building function into a slider-driven
     live view, rendered with Plotly exactly like show() — no FigureWidget,
-    no custom widget manager, so it works the same in JupyterLab, VS Code
-    notebooks, and Google Colab.
+    just standard ipywidgets sliders driving a rebuild-and-redraw. Works in
+    JupyterLab, VS Code notebooks, and Google Colab; in Colab specifically
+    this transparently enables Colab's custom widget manager, since Colab's
+    default widget frontend doesn't execute the JS Plotly injects to draw
+    a chart inside an Output widget otherwise.
 
     The decorated function is expected to accept the same keyword names
     given in **controls and return the object(s) show()/_build_figure()
@@ -157,6 +176,7 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
 
         output = widgets.interactive_output(_redraw, sliders)
 
+        _enable_colab_custom_widget_manager()
         display(widgets.VBox([widgets.VBox(list(sliders.values())), output]))
 
         return build_fn
