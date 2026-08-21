@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 cq = pytest.importorskip("cadquery")
@@ -120,39 +122,67 @@ def test_export_step_invalid_unit_raises(tmp_path, cq_box):
 
 # ── export_step — unit correctness ───────────────────────────────────────────
 #
-# CadQuery and build123d both always represent geometry internally in
-# millimeters. A STEP file is only correct if its declared header unit and
-# its raw coordinate magnitudes agree on the model's true physical size —
-# get that wrong (as build123d's own export_step(unit=...) does — see
-# _export_b3d()'s docstring in exporter.py) and lenient viewers still open
-# the file (just at the wrong scale) while stricter ones (e.g. Revit) can
-# reject it outright. These tests round-trip through CadQuery's STEP
-# importer, which is unit-aware, to verify the exported file's declared
-# size actually matches the original model — not just that a file exists.
+# Neither CadQuery nor build123d's geometry kernel enforces a unit — a
+# modeled dimension of 5 is just the number 5 until export declares what it
+# means. This project's modeling convention treats that number as already
+# being in the target unit (e.g. a slider/box value of 10 means 10 real
+# meters), so export_step() must declare the requested unit *without*
+# rescaling the coordinates. These tests check both halves of that
+# contract: the raw CARTESIAN_POINT values in the file are untouched
+# (still "5", not "0.005"), and re-importing via CadQuery's unit-aware STEP
+# importer confirms the file really does declare "5 <unit>" — e.g. a "5"
+# exported as meters round-trips to 5000 in CadQuery's own mm-based working
+# units (5 real meters), not 5 (which would mean the file was mislabeled
+# and actually describes a 5mm object).
 
 def _imported_xlen(step_path):
     imported = cq.importers.importStep(str(step_path))
     return imported.val().BoundingBox().xlen
 
-def test_export_step_cadquery_meters_default_preserves_true_size(tmp_path, cq_box):
+def _cartesian_point_values(step_path):
+    """All raw numeric values written into CARTESIAN_POINT entities."""
+    content = step_path.read_text()
+    return [
+        float(v)
+        for line in content.splitlines() if "CARTESIAN_POINT" in line
+        for v in re.findall(r"-?\d+\.?\d*(?:E[+-]?\d+)?", line.split("(", 2)[-1])
+    ]
+
+def test_export_step_cadquery_meters_default_keeps_raw_values(tmp_path, cq_box):
     target = tmp_path / "box.step"
     export_step(cq_box, str(target))  # default unit — "M"
-    assert _imported_xlen(target) == pytest.approx(5.0)  # cq_box is 5mm x 3mm x 2mm
+    # cq_box is 5 wide -> half-extent 2.5, unscaled (not 0.0025)
+    assert 2.5 in _cartesian_point_values(target)
 
-def test_export_step_cadquery_millimeters_preserves_true_size(tmp_path, cq_box):
+def test_export_step_cadquery_meters_default_declares_5_meters(tmp_path, cq_box):
+    target = tmp_path / "box.step"
+    export_step(cq_box, str(target))  # default unit — "M"
+    # cq_box modeled with raw value 5 -> declared as 5 meters -> re-imports
+    # as 5000 in CadQuery's own mm-based working units (5 real meters).
+    assert _imported_xlen(target) == pytest.approx(5000.0)
+
+def test_export_step_cadquery_millimeters_keeps_raw_values_and_scale(tmp_path, cq_box):
     target = tmp_path / "box.step"
     export_step(cq_box, str(target), unit="MM")
-    assert _imported_xlen(target) == pytest.approx(5.0)
+    assert _imported_xlen(target) == pytest.approx(5.0)  # unchanged, as before this feature
 
-def test_export_step_build123d_meters_default_preserves_true_size(tmp_path, b3d_box):
+def test_export_step_build123d_meters_default_keeps_raw_values(tmp_path, b3d_box):
     target = tmp_path / "box.step"
     export_step(b3d_box, str(target))  # default unit — "M"
-    assert _imported_xlen(target) == pytest.approx(4.0)  # b3d_box is 4mm cube
+    # b3d_box is a 4-wide cube -> half-extent 2.0, unscaled (not 0.002)
+    assert 2.0 in _cartesian_point_values(target)
 
-def test_export_step_build123d_millimeters_preserves_true_size(tmp_path, b3d_box):
+def test_export_step_build123d_meters_default_declares_4_meters(tmp_path, b3d_box):
+    target = tmp_path / "box.step"
+    export_step(b3d_box, str(target))  # default unit — "M"
+    # b3d_box modeled with raw value 4 -> declared as 4 meters -> re-imports
+    # as 4000 in CadQuery's own mm-based working units (4 real meters).
+    assert _imported_xlen(target) == pytest.approx(4000.0)
+
+def test_export_step_build123d_millimeters_keeps_raw_values_and_scale(tmp_path, b3d_box):
     target = tmp_path / "box.step"
     export_step(b3d_box, str(target), unit="MM")
-    assert _imported_xlen(target) == pytest.approx(4.0)
+    assert _imported_xlen(target) == pytest.approx(4.0)  # unchanged, as before this feature
 
 def test_export_step_cadquery_meters_header_declares_metre(tmp_path, cq_box):
     target = tmp_path / "box.step"

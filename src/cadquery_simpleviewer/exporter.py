@@ -10,12 +10,13 @@ from .adapters import get_adapter
 _DEFAULT_EXPORT_FILENAME = "model.step"
 _DEFAULT_EXPORT_UNIT = "M"
 
-# millimeters per unit — both CadQuery and build123d always represent
-# geometry internally in millimeters, so every conversion is relative to MM.
-_MM_PER_UNIT = {"MM": 1.0, "M": 1000.0}
+# Neither CadQuery nor build123d's geometry kernel enforces a unit — a
+# modeled value of 10 is just the number 10 until a unit is declared on
+# export. These are the units export_step() can declare.
+_SUPPORTED_UNITS = {"MM", "M"}
 
 # The exact STEP header entity text for each supported unit's SI_UNIT
-# declaration, used to patch build123d's exported header (see _b3d_export
+# declaration, used to patch build123d's exported header (see _export_b3d
 # for why this is necessary).
 _STEP_SI_UNIT_TEXT = {
     "MM": "SI_UNIT(.MILLI.,.METRE.)",
@@ -43,10 +44,10 @@ def resolve_export_config(export):
 
 
 def _validate_unit(unit):
-    if unit not in _MM_PER_UNIT:
+    if unit not in _SUPPORTED_UNITS:
         raise ValueError(
             f"Unsupported export unit {unit!r} — supported units: "
-            f"{sorted(_MM_PER_UNIT)}"
+            f"{sorted(_SUPPORTED_UNITS)}"
         )
 
 
@@ -63,50 +64,45 @@ def _is_solid(obj, adapter):
 
 def _export_cq(cq_solids, filepath, unit):
     """
-    Export CadQuery solids to STEP in `unit`.
-
-    CadQuery's Workplane geometry is always expressed internally in
-    millimeters, so `unit="MM"` here always describes the *true* unit of
-    the raw geometry values — it must never change. `outputUnit` is what
-    actually controls the unit the STEP file is written in: OCCT converts
-    the coordinate values from `unit` to `outputUnit` on write, and writes
-    the matching SI_UNIT declaration in the header, so the file stays
-    internally consistent (verified: a 10mm CadQuery box exported with
-    outputUnit="M" round-trips back to a 10mm box on import, not 10m).
+    Export CadQuery solids to STEP, declaring the file's unit as `unit`
+    with no rescaling — the raw geometry values are taken exactly as
+    modeled and just labeled `unit` (e.g. a box built with .box(10, 10, 2)
+    is written as literally 10 of whatever `unit` is, not converted from
+    an assumed "true" unit). Passing only `unit` (no `outputUnit`) makes
+    OCCT interpret and declare the values in the same unit, so nothing is
+    rescaled — verified: the exported CARTESIAN_POINT values are identical
+    regardless of `unit`, only the header's SI_UNIT declaration changes.
     """
     import cadquery as cq
 
     shapes = [solid.val() for solid in cq_solids]
-    cq.exporters.export(shapes, filepath, exportType="STEP", unit="MM", outputUnit=unit)
+    cq.exporters.export(shapes, filepath, exportType="STEP", unit=unit)
 
 
 def _export_b3d(b3d_solids, filepath, unit):
     """
-    Export build123d solids to STEP in `unit`.
+    Export build123d solids to STEP, declaring the file's unit as `unit`
+    with no rescaling — same "values taken as-is" contract as _export_cq().
 
-    build123d's export_step(unit=...) is unsafe for anything but the
-    default Unit.MM: passing e.g. Unit.M silently rescales the exported
-    coordinate values by 1000x, but always writes the header's SI_UNIT
-    declaration as millimeter regardless of `unit` (confirmed by
-    inspecting the raw STEP output — see exporter tests). Using it
-    directly produces a file whose declared unit and actual coordinate
-    magnitude disagree — lenient viewers like Rhino render it anyway
-    (at 1000x the true size), while stricter importers like Revit can
-    reject it outright.
+    build123d's own export_step(unit=...) can't be used for this: passing
+    anything but its default Unit.MM silently rescales the exported
+    coordinate values by the unit ratio (e.g. x1000 for Unit.M) while
+    *always* writing the header's SI_UNIT declaration as millimeter
+    regardless of `unit` — confirmed by inspecting the raw STEP output
+    (see exporter tests). That mismatch between declared unit and actual
+    coordinate magnitude is exactly what produces a file that opens at the
+    wrong scale (or gets rejected by strict importers like Revit) — the
+    numbers get scaled but the label lies about it.
 
-    The workaround: pre-scale the shape ourselves with Shape.scale() to
-    the target unit, export with build123d's default (Unit.MM, which
-    applies no extra scaling — a verified no-op), then patch the
-    resulting file's header text to declare the unit we actually used.
+    The workaround: always export with build123d's default (Unit.MM,
+    verified to pass the coordinate values through unchanged — no `unit=`
+    kwarg passed here at all), then patch the resulting file's header text
+    directly to declare `unit`, without touching the coordinates.
     """
     from build123d.topology import Compound
     from build123d.exporters3d import export_step as _b3d_export_step
 
     shape = Compound(b3d_solids) if len(b3d_solids) > 1 else b3d_solids[0]
-
-    factor = _MM_PER_UNIT["MM"] / _MM_PER_UNIT[unit]
-    if factor != 1.0:
-        shape = shape.scale(factor)
 
     _b3d_export_step(shape, filepath)
 
@@ -122,7 +118,13 @@ def export_step(objects, filepath, unit=_DEFAULT_EXPORT_UNIT):
     """
     Export the solid object(s) in `objects` (same shape show() accepts —
     a single object or a list, CadQuery and/or build123d) to a STEP file at
-    `filepath`, declared in `unit` ("M" or "MM", default "M"). Non-solid
+    `filepath`, declared in `unit` ("M" or "MM", default "M"). The raw
+    geometry values are written exactly as modeled — no rescaling happens.
+    Neither CadQuery nor build123d's geometry kernel enforces a unit, so
+    `unit` just labels the numbers already on the model: if your modeling
+    convention treats a dimension of 10 as 10 meters, `unit="M"` (the
+    default) declares the file that way with no conversion; a workflow
+    that models in millimeters should pass `unit="MM"` instead. Non-solid
     items (edges/wires/points) are skipped. Multiple solids from the same
     library are combined into a single compound.
 
