@@ -449,6 +449,7 @@ show(
     padding=0.15,
     points_display=None,
     lines_display=None,
+    export=None,
 )
 ```
 
@@ -469,6 +470,7 @@ show(
 | `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis |
 | `points_display` | dict or None | `None` | Marker style for point objects. Keys: `size`, `color`, `symbol`, `opacity` |
 | `lines_display` | dict or None | `None` | Line style for edge and wire objects. Keys: `color`, `width`, `mode`, `samples`, `opacity` |
+| `export` | dict, False, or None | `None` | STEP export button config. `None` (default) shows the button with default settings. `False` disables it. A dict customizes it — see [Exporting to STEP](#exporting-to-step) |
 
 ### Interactive controls
 
@@ -478,11 +480,39 @@ show(
 | **Y ● / Y ○** | Toggle Y axis on or off |
 | **Z ● / Z ○** | Toggle Z axis on or off |
 | **Camera** | Switch between Perspective and Orthographic projection |
+| **Export STEP** | Write the currently shown solid(s) to a STEP file on disk |
 | Left drag | Orbit |
 | Scroll | Zoom |
 | Right drag | Pan |
 
 ---
+
+## Exporting to STEP
+
+Both `show()` and `interactive()` display an **Export STEP** button by default, right below the figure. Clicking it writes the model's solid object(s) to a STEP file on disk (in the notebook's working directory by default) and prints a confirmation — or an error — below the button.
+
+```python
+show(box)  # "Export STEP" button writes ./model.step on click
+```
+
+Customize the output path with a dict, or turn the button off entirely with `False`:
+
+```python
+show(box, export=dict(filename="parts/bracket.step"))
+show(box, export=False)
+```
+
+Only solid objects are exported — edges, wires, and plain points are skipped. If `objects` contains several solids from the same library (CadQuery or build123d), they're combined into a single compound in the STEP file. Mixing CadQuery and build123d solids in the same call raises an error, since they can't be combined into one compound.
+
+For `interactive()`, pass `export` inside `show_kwargs`. Clicking the button always exports the object(s) built from the sliders' **current** values, not the values at the time the decorator ran:
+
+```python
+@interactive(width=(1, 10, 0.5, 5), show_kwargs=dict(export=dict(filename="box.step")))
+def model(width):
+    return cq.Workplane("XY").box(width, 3, 2)
+```
+
+The export button requires `ipywidgets` (see the `interactive` extra above); if it isn't installed, `show()` falls back to its normal behavior with no button — `interactive()` itself already requires `ipywidgets` regardless of export.
 
 ## Pixi environment example
 

@@ -1,38 +1,17 @@
 import inspect
 import json
-import sys
 import uuid
 
 from plotly.utils import PlotlyJSONEncoder
 
 from .viewer import _build_figure
-
-try:
-    import ipywidgets as widgets
-    from IPython.display import display, clear_output, HTML, Javascript
-except ImportError:
-    widgets = None
-    display = None
-    clear_output = None
-    HTML = None
-    Javascript = None
+from .exporter import resolve_export_config, export_step
+from ._optional_widgets import (
+    widgets, display, clear_output, HTML, Javascript,
+    enable_colab_custom_widget_manager,
+)
 
 _UIREVISION = "cadquery-simpleviewer"
-
-
-def _enable_colab_custom_widget_manager():
-    """
-    Google Colab renders ipywidgets through its own frontend, which only
-    executes third-party JS content (like the <script> Plotly injects to
-    draw a chart) inside an Output widget once the custom widget manager
-    is enabled — without it, sliders render fine but the Output stays
-    visually empty even though the figure was captured into it. This is a
-    no-op outside Colab.
-    """
-    if "google.colab" not in sys.modules:
-        return
-    from google.colab import output as colab_output
-    colab_output.enable_custom_widget_manager()
 
 
 def _make_slider(widgets, name, spec):
@@ -129,9 +108,13 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                           visible_axes, z, plane_color, plane_size,
                           plane_opacity, tessellation_tolerance,
                           angular_tolerance, flat_shading, padding,
-                          points_display, lines_display). Kept separate
-                          from **controls so it can never collide with a
-                          model parameter name.
+                          points_display, lines_display), plus "export"
+                          (see show()'s `export` parameter) — on by
+                          default, and always exports the object(s) built
+                          from the sliders' *current* values at the moment
+                          the button is clicked, not the initial render.
+                          Kept separate from **controls so it can never
+                          collide with a model parameter name.
     continuous_update   : applied to every generated slider — False
                           (default) rebuilds only when the slider is
                           released, since a CAD rebuild + tessellation
@@ -155,6 +138,7 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
         )
 
     show_kwargs = dict(show_kwargs) if show_kwargs else {}
+    export_cfg = resolve_export_config(show_kwargs.pop("export", None))
     figure_kwargs = dict(
         names=None, colors=None, opacity=1.0, visible_axes="xyz", z=None,
         plane_color="whitesmoke", plane_size=50, plane_opacity=0.8,
@@ -254,10 +238,30 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
             slider.observe(_redraw, names="value")
         _redraw()
 
-        _enable_colab_custom_widget_manager()
-        display(widgets.VBox(
-            [widgets.VBox(list(sliders.values())), plot_output, js_output]
-        ))
+        vbox_children = [widgets.VBox(list(sliders.values())), plot_output, js_output]
+
+        if export_cfg is not None:
+            export_button = widgets.Button(description="Export STEP", icon="download")
+            export_status = widgets.Output()
+
+            def _on_export_click(_btn):
+                values = {name: slider.value for name, slider in sliders.items()}
+                result = build_fn(**values)
+                export_objects = result["objects"] if isinstance(result, dict) else result
+
+                with export_status:
+                    clear_output(wait=True)
+                    try:
+                        path = export_step(export_objects, export_cfg["filename"])
+                        print(f"Exported to {path}")
+                    except Exception as exc:
+                        print(f"Export failed: {exc}")
+
+            export_button.on_click(_on_export_click)
+            vbox_children.extend([export_button, export_status])
+
+        enable_colab_custom_widget_manager()
+        display(widgets.VBox(vbox_children))
 
         return build_fn
 

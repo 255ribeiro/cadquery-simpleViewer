@@ -1,3 +1,4 @@
+import ipywidgets as widgets
 import plotly.graph_objects as go
 import pytest
 from unittest.mock import patch
@@ -62,6 +63,7 @@ def rect_wire():
 
 def _capture_fig(obj, **kwargs):
     captured = {}
+    kwargs.setdefault("export", False)
 
     def fake_show(self):
         captured["fig"] = self
@@ -293,42 +295,42 @@ def test_expand_for_plane_includes_z_level():
 
 def test_show_runs_with_mesh(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(box)
+        show(box, export=False)
 
 def test_show_runs_with_edge(straight_edge):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(straight_edge)
+        show(straight_edge, export=False)
 
 def test_show_runs_with_wire(rect_wire):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(rect_wire)
+        show(rect_wire, export=False)
 
 def test_show_runs_with_arc(arc_edge):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(arc_edge)
+        show(arc_edge, export=False)
 
 def test_show_runs_with_vector(vec):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(vec)
+        show(vec, export=False)
 
 def test_show_runs_mixed_all_types(box, straight_edge, rect_wire, vec):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show([box, straight_edge, rect_wire, vec])
+        show([box, straight_edge, rect_wire, vec], export=False)
 
 def test_show_runs_mixed_cadquery_and_build123d(box):
     with b3d.BuildPart() as bp:
         b3d.Box(4, 4, 4)
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show([box, bp.part], names=["CadQuery box", "build123d box"])
+        show([box, bp.part], names=["CadQuery box", "build123d box"], export=False)
 
 def test_show_lines_display_accepted(straight_edge):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-        show(straight_edge, lines_display=dict(color="blue", width=3, samples=20))
+        show(straight_edge, lines_display=dict(color="blue", width=3, samples=20), export=False)
 
 def test_show_invalid_axes_raises(box):
     with pytest.raises(ValueError):
         with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
-            show(box, visible_axes="w")
+            show(box, visible_axes="w", export=False)
 
 
 # ── show — equal scale ───────────────────────────────────────────────────────
@@ -420,3 +422,57 @@ def test_xyz_shows_all(box):
     assert fig.layout.scene.xaxis.showbackground == True
     assert fig.layout.scene.yaxis.showbackground == True
     assert fig.layout.scene.zaxis.showbackground == True
+
+
+# ── show — export button ─────────────────────────────────────────────────────
+
+def test_show_default_export_displays_button_and_status(box):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display:
+        show(box)
+
+    vbox = mock_display.call_args[0][0]
+    assert isinstance(vbox, widgets.HBox)
+    button, status = vbox.children
+    assert isinstance(button, widgets.Button)
+    assert button.description == "Export STEP"
+    assert isinstance(status, widgets.Output)
+
+def test_show_export_false_skips_button(box):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display:
+        show(box, export=False)
+
+    mock_display.assert_not_called()
+
+def test_show_export_missing_ipywidgets_falls_back_silently(box):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.widgets", None), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display:
+        show(box)
+
+    mock_display.assert_not_called()
+
+def test_show_export_button_click_writes_step_file(tmp_path, box):
+    target = tmp_path / "exported.step"
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display:
+        show(box, export=dict(filename=str(target)))
+
+    vbox = mock_display.call_args[0][0]
+    button, _status = vbox.children
+    button.click()
+
+    assert target.exists()
+
+def test_show_export_button_click_reports_failure(tmp_path, straight_edge, capsys):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display:
+        show(straight_edge, export=dict(filename=str(tmp_path / "edge.step")))
+
+    vbox = mock_display.call_args[0][0]
+    button, _status = vbox.children
+    button.click()
+
+    assert "Export failed" in capsys.readouterr().out

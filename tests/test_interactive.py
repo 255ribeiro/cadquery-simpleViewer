@@ -280,3 +280,83 @@ def test_interactive_missing_ipywidgets_raises_import_error():
             @interactive(width=(1, 10))
             def model(width):
                 return cq.Workplane("XY").box(width, 3, 2)
+
+
+# ── export button ────────────────────────────────────────────────────────────
+
+def _vbox_children(mock_display):
+    return mock_display.call_args[0][0].children
+
+
+def test_interactive_default_export_adds_button_and_status(_no_display):
+    @interactive(width=(1, 10, 1, 5))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    children = _vbox_children(_no_display)
+    assert len(children) == 5
+    export_button, export_status = children[3], children[4]
+    assert isinstance(export_button, widgets.Button)
+    assert export_button.description == "Export STEP"
+    assert isinstance(export_status, widgets.Output)
+
+
+def test_interactive_export_false_skips_button(_no_display):
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=False))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    children = _vbox_children(_no_display)
+    assert len(children) == 3
+
+
+def test_interactive_export_uses_current_slider_value(tmp_path, _no_display):
+    target = tmp_path / "model.step"
+    calls = []
+
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=dict(filename=str(target))))
+    def model(width):
+        calls.append(width)
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    vbox = _no_display.call_args[0][0]
+    slider = vbox.children[0].children[0]
+    export_button = vbox.children[3]
+
+    slider.value = 8
+    export_button.click()
+
+    assert calls[-1] == 8
+    assert target.exists()
+
+
+def test_interactive_export_dict_return_uses_overridden_objects(tmp_path, _no_display):
+    target = tmp_path / "model.step"
+
+    @interactive(radius=(1, 9, 1, 5), show_kwargs=dict(export=dict(filename=str(target))))
+    def model(radius):
+        box = cq.Workplane("XY").box(10, 10, 2)
+        if radius >= 5:
+            return {"objects": box, "colors": ["indianred"]}
+        return box
+
+    vbox = _no_display.call_args[0][0]
+    export_button = vbox.children[3]
+
+    export_button.click()
+
+    assert target.exists()
+
+
+def test_interactive_export_button_click_reports_failure(_no_display, capsys):
+    @interactive(width=(1, 10, 1, 5),
+                 show_kwargs=dict(export=dict(filename="ignored.step")))
+    def model(width):
+        return cq.Edge.makeLine(cq.Vector(0, 0, 0), cq.Vector(width, 0, 0))
+
+    vbox = _no_display.call_args[0][0]
+    export_button = vbox.children[3]
+
+    export_button.click()
+
+    assert "Export failed" in capsys.readouterr().out

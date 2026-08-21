@@ -1,6 +1,8 @@
 import plotly.graph_objects as go
 from .adapters import get_adapter
 from .plane import _base_plane
+from .exporter import resolve_export_config, export_step
+from ._optional_widgets import widgets, display, clear_output, enable_colab_custom_widget_manager
 
 _DEFAULT_COLORS = [
     "steelblue", "indianred", "seagreen",
@@ -538,6 +540,7 @@ def show(
     padding=0.15,
     points_display=None,
     lines_display=None,
+    export=None,
 ):
     """
     Display one or more CadQuery and/or build123d objects as an interactive
@@ -594,6 +597,19 @@ def show(
                                           (default 50). Increase for tight curves,
                                           helices, or complex splines.
                                 opacity — line opacity (default 1.0)
+    export                  : STEP export button config — on by default (a
+                              button labeled "Export STEP" is shown below
+                              the figure, writing "model.step" to the
+                              current working directory on click). Pass a
+                              dict to customize, e.g.
+                              export=dict(filename="my_part.step"), or
+                              export=False to disable it. Only solid
+                              objects are exported (edges/wires/points are
+                              skipped); multiple solids are combined into
+                              one compound; mixing CadQuery and build123d
+                              solids in one call raises an error. Requires
+                              ipywidgets — silently skipped if it isn't
+                              installed (install the "interactive" extra).
     """
     fig = _build_figure(
         objects, names, colors, opacity, visible_axes, z,
@@ -602,3 +618,21 @@ def show(
         padding, points_display, lines_display,
     )
     fig.show()
+
+    export_cfg = resolve_export_config(export)
+    if export_cfg is not None and widgets is not None:
+        enable_colab_custom_widget_manager()
+        button = widgets.Button(description="Export STEP", icon="download")
+        status = widgets.Output()
+
+        def _on_click(_btn):
+            with status:
+                clear_output(wait=True)
+                try:
+                    path = export_step(objects, export_cfg["filename"])
+                    print(f"Exported to {path}")
+                except Exception as exc:
+                    print(f"Export failed: {exc}")
+
+        button.on_click(_on_click)
+        display(widgets.HBox([button, status]))
