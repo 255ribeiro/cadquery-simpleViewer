@@ -470,7 +470,7 @@ show(
 | `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis |
 | `points_display` | dict or None | `None` | Marker style for point objects. Keys: `size`, `color`, `symbol`, `opacity` |
 | `lines_display` | dict or None | `None` | Line style for edge and wire objects. Keys: `color`, `width`, `mode`, `samples`, `opacity` |
-| `export` | dict, False, or None | `None` | STEP export button config. `None` (default) shows the button with default settings. `False` disables it. A dict customizes it — see [Exporting to STEP](#exporting-to-step) |
+| `export` | dict, False, or None | `None` | STEP export button config. `None` (default) shows the button, exporting in meters. `False` disables it. A dict customizes it (`filename`, `unit` — `"M"` or `"MM"`) — see [Exporting to STEP](#exporting-to-step) |
 
 ### Interactive controls
 
@@ -495,12 +495,17 @@ Both `show()` and `interactive()` display an **Export STEP** button by default, 
 show(box)  # "Export STEP" button writes ./model.step on click
 ```
 
-Customize the output path with a dict, or turn the button off entirely with `False`:
+Customize the output path or unit with a dict, or turn the button off entirely with `False`:
 
 ```python
 show(box, export=dict(filename="parts/bracket.step"))
+show(box, export=dict(unit="MM"))  # STEP file declared/scaled in millimeters instead
 show(box, export=False)
 ```
+
+The exported file is written in **meters** by default (`unit="M"`) — pass `unit="MM"` for millimeters. Both CadQuery and build123d always model in millimeters internally, so converting to meters means both the numbers *and* the file's declared unit are changed together, consistently, so the model's true physical size round-trips correctly through any STEP-compliant importer.
+
+> **Why this matters for Revit:** a STEP file is only valid if its declared unit and its raw coordinate values agree on the model's real-world size. Get that wrong — e.g. by relabeling a file's unit without rescaling its coordinates, or vice versa — and the file still *opens* in lenient viewers like Rhino (which mostly just renders whatever numbers it's given), but can silently balk or reject the import in a stricter, standards-conformant tool like Revit. If you're exporting build123d objects: build123d's own `export_step(unit=...)` has exactly this bug in current versions — passing anything but its default (millimeters) rescales the coordinates without updating the file's header, producing a file that's internally inconsistent by exactly 1000x. `export_step()` in this package works around it (pre-scaling the shape correctly and patching the header to match) so `unit="M"`/`unit="MM"` are both safe to use here regardless.
 
 Only solid objects are exported — edges, wires, and plain points are skipped. If `objects` contains several solids from the same library (CadQuery or build123d), they're combined into a single compound in the STEP file. Mixing CadQuery and build123d solids in the same call raises an error, since they can't be combined into one compound.
 

@@ -252,7 +252,9 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                 with export_status:
                     clear_output(wait=True)
                     try:
-                        path = export_step(export_objects, export_cfg["filename"])
+                        path = export_step(
+                            export_objects, export_cfg["filename"], export_cfg["unit"]
+                        )
                         print(f"Exported to {path}")
                     except Exception as exc:
                         print(f"Export failed: {exc}")

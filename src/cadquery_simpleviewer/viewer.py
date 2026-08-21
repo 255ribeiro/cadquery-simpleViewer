@@ -600,16 +600,18 @@ def show(
     export                  : STEP export button config — on by default (a
                               button labeled "Export STEP" is shown below
                               the figure, writing "model.step" to the
-                              current working directory on click). Pass a
-                              dict to customize, e.g.
-                              export=dict(filename="my_part.step"), or
-                              export=False to disable it. Only solid
-                              objects are exported (edges/wires/points are
-                              skipped); multiple solids are combined into
-                              one compound; mixing CadQuery and build123d
-                              solids in one call raises an error. Requires
-                              ipywidgets — silently skipped if it isn't
-                              installed (install the "interactive" extra).
+                              current working directory, in meters, on
+                              click). Pass a dict to customize, e.g.
+                              export=dict(filename="my_part.step",
+                              unit="MM"), or export=False to disable it.
+                              "unit" accepts "M" (default) or "MM". Only
+                              solid objects are exported (edges/wires/points
+                              are skipped); multiple solids are combined
+                              into one compound; mixing CadQuery and
+                              build123d solids in one call raises an error.
+                              Requires ipywidgets — silently skipped if it
+                              isn't installed (install the "interactive"
+                              extra).
     """
     fig = _build_figure(
         objects, names, colors, opacity, visible_axes, z,
@@ -629,7 +631,7 @@ def show(
             with status:
                 clear_output(wait=True)
                 try:
-                    path = export_step(objects, export_cfg["filename"])
+                    path = export_step(objects, export_cfg["filename"], export_cfg["unit"])
                     print(f"Exported to {path}")
                 except Exception as exc:
                     print(f"Export failed: {exc}")
