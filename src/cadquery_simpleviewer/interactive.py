@@ -1,14 +1,23 @@
 import inspect
+import json
 import sys
+import uuid
+
+from plotly.utils import PlotlyJSONEncoder
 
 from .viewer import _build_figure
 
 try:
     import ipywidgets as widgets
-    from IPython.display import display
+    from IPython.display import display, clear_output, HTML, Javascript
 except ImportError:
     widgets = None
     display = None
+    clear_output = None
+    HTML = None
+    Javascript = None
+
+_UIREVISION = "cadquery-simpleviewer"
 
 
 def _enable_colab_custom_widget_manager():
@@ -73,11 +82,15 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
     """
     Decorator that turns a CAD model-building function into a slider-driven
     live view, rendered with Plotly exactly like show() — no FigureWidget,
-    just standard ipywidgets sliders driving a rebuild-and-redraw. Works in
-    JupyterLab, VS Code notebooks, and Google Colab; in Colab specifically
-    this transparently enables Colab's custom widget manager, since Colab's
-    default widget frontend doesn't execute the JS Plotly injects to draw
-    a chart inside an Output widget otherwise.
+    just standard ipywidgets sliders driving a rebuild. Unlike show(), the
+    chart itself is drawn once into a fixed div and patched in place via
+    Plotly.react() on every slider change, so the camera angle/zoom you
+    leave it at is preserved across redraws instead of resetting — a
+    "Reset View" button on the chart snaps back to the default framing.
+    Works in JupyterLab, VS Code notebooks, and Google Colab; in Colab
+    specifically this transparently enables Colab's custom widget manager,
+    since Colab's default widget frontend doesn't execute the JS Plotly
+    injects to draw or update a chart inside an Output widget otherwise.
 
     The decorated function is expected to accept the same keyword names
     given in **controls, and return either:
@@ -167,13 +180,20 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                 slider.continuous_update = continuous_update
             sliders[name] = slider
 
-        def _redraw(**values):
-            # Runs inside the Output widget interactive_output() manages
-            # (clear_output(wait=True) + capture already handled there) —
-            # do not wrap this in a second, separately-displayed Output;
-            # nested Output widgets can end up sharing the same frontend
-            # routing id, so the figure renders into the hidden one instead
-            # of the one actually shown on screen.
+        div_id = f"cqsv-{uuid.uuid4().hex}"
+        plot_output = widgets.Output()
+        js_output = widgets.Output()
+        state = {"rendered": False}
+
+        def _redraw(*_change):
+            # Called directly from each slider's .observe() callback, not
+            # from ipywidgets.interactive_output() — that helper wraps the
+            # call in its own managing Output, and nesting a second,
+            # separately-displayed Output inside it (which the first-render
+            # / redraw paths below both need) can end up sharing the same
+            # frontend routing id, so the figure renders into the hidden
+            # Output instead of the one actually shown on screen.
+            values = {name: slider.value for name, slider in sliders.items()}
             result = build_fn(**values)
 
             if isinstance(result, dict):
@@ -205,12 +225,39 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                 call_kwargs["flat_shading"], call_kwargs["padding"],
                 call_kwargs["points_display"], call_kwargs["lines_display"],
             )
-            fig.show()
+            fig.update_layout(scene=dict(uirevision=_UIREVISION))
 
-        output = widgets.interactive_output(_redraw, sliders)
+            if not state["rendered"]:
+                state["rendered"] = True
+                with plot_output:
+                    display(HTML(fig.to_html(
+                        div_id=div_id, include_plotlyjs="cdn", full_html=False
+                    )))
+            else:
+                # Patch the existing chart in place instead of rebuilding
+                # it, and omit scene.camera from the patch entirely — this
+                # is what makes Plotly.react() keep the camera angle/zoom
+                # the user currently has instead of resetting it back to
+                # the figure's default.
+                fig_json = fig.to_plotly_json()
+                layout_patch = fig_json["layout"]
+                layout_patch.get("scene", {}).pop("camera", None)
+                data_json = json.dumps(fig_json["data"], cls=PlotlyJSONEncoder)
+                layout_json = json.dumps(layout_patch, cls=PlotlyJSONEncoder)
+                with js_output:
+                    clear_output(wait=True)
+                    display(Javascript(
+                        f"Plotly.react({json.dumps(div_id)}, {data_json}, {layout_json});"
+                    ))
+
+        for slider in sliders.values():
+            slider.observe(_redraw, names="value")
+        _redraw()
 
         _enable_colab_custom_widget_manager()
-        display(widgets.VBox([widgets.VBox(list(sliders.values())), output]))
+        display(widgets.VBox(
+            [widgets.VBox(list(sliders.values())), plot_output, js_output]
+        ))
 
         return build_fn
 

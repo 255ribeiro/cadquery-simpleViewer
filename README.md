@@ -355,7 +355,9 @@ The viewer renders inline as an interactive Plotly figure. No extensions or widg
 
 ## Sliders / Interactive Parameters
 
-Wrap a model-building function with `@interactive(...)` to control its parameters with sliders and re-render on every change — in JupyterLab, VS Code notebooks, and Google Colab alike. It's built entirely on core `ipywidgets` (sliders, `Output`) driving a normal `show()`-style Plotly render, so — like the rest of this library — it needs no extensions or custom widget managers, even in Colab.
+Wrap a model-building function with `@interactive(...)` to control its parameters with sliders and re-render on every change — in JupyterLab, VS Code notebooks, and Google Colab alike. It's built entirely on core `ipywidgets` (sliders, `Output`) driving a `show()`-style Plotly chart, patched in place on every change rather than rebuilt from scratch — so whatever camera angle and zoom you leave the chart at is preserved across slider moves instead of resetting. A "Reset View" button on the chart snaps back to the default framing at any time.
+
+Because the camera direction is preserved in a normalized, equal-aspect view cube rather than in absolute coordinates, a very large jump in one dimension can still shift how the object sits in frame even though the *angle* stays the same — click "Reset View" (or the "Perspective"/"Orthographic" camera menu) to reframe.
 
 ```python
 import cadquery as cq

@@ -26,6 +26,12 @@ _VALID_AXES = {None, "x", "y", "z", "xy", "xz", "yz", "xyz"}
 
 _EQUAL_ASPECT = dict(x=1, y=1, z=1)
 
+_DEFAULT_CAMERA = dict(
+    projection=dict(type="perspective"),
+    eye=dict(x=1.5, y=1.5, z=1.5),
+    up=dict(x=0, y=0, z=1),
+)
+
 
 # ── plain point detection (no CAD library involved) ────────────────────────────
 
@@ -394,6 +400,37 @@ def _make_camera_menu(x_pos):
     )
 
 
+def _make_reset_view_button(x_pos):
+    """
+    Single button that relayouts the camera and aspect settings back to
+    their defaults — a one-click way back to the default framing, useful
+    once interactive() redraws stop resetting the camera on every change.
+    """
+    return dict(
+        type="buttons",
+        direction="right",
+        x=x_pos,
+        y=1.13,
+        xanchor="left",
+        yanchor="top",
+        showactive=False,
+        bgcolor="white",
+        bordercolor="lightgray",
+        font=dict(size=11),
+        buttons=[
+            dict(
+                label="Reset View",
+                method="relayout",
+                args=[{
+                    "scene.camera": _DEFAULT_CAMERA,
+                    "scene.aspectmode": "manual",
+                    "scene.aspectratio": _EQUAL_ASPECT,
+                }]
+            ),
+        ]
+    )
+
+
 # ── figure building ──────────────────────────────────────────────────────────
 
 def _build_figure(
@@ -451,10 +488,11 @@ def _build_figure(
             x_range, y_range, z_range, plane_size, z
         )
 
-    menu_x   = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
-    menu_y   = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
-    menu_z   = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
-    menu_cam = _make_camera_menu(x_pos=0.56)
+    menu_x     = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
+    menu_y     = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
+    menu_z     = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
+    menu_cam   = _make_camera_menu(x_pos=0.56)
+    menu_reset = _make_reset_view_button(x_pos=0.75)
 
     annotations = [
         dict(text="Axes:", x=-0.01, y=1.17, xref="paper", yref="paper",
@@ -471,13 +509,9 @@ def _build_figure(
             xaxis=_axis_dict(show_x, x_range),
             yaxis=_axis_dict(show_y, y_range),
             zaxis=_axis_dict(show_z, z_range),
-            camera=dict(
-                projection=dict(type="perspective"),
-                eye=dict(x=1.5, y=1.5, z=1.5),
-                up=dict(x=0, y=0, z=1)
-            )
+            camera=_DEFAULT_CAMERA
         ),
-        updatemenus=[menu_x, menu_y, menu_z, menu_cam],
+        updatemenus=[menu_x, menu_y, menu_z, menu_cam, menu_reset],
         annotations=annotations,
         legend=dict(x=0, y=1),
         margin=dict(l=0, r=0, t=90, b=0)

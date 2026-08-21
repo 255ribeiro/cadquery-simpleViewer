@@ -1,9 +1,11 @@
+import re
 import sys
 import types
 
 import ipywidgets as widgets
 import plotly.graph_objects as go
 import pytest
+from IPython.display import HTML, Javascript
 from unittest.mock import MagicMock, patch
 
 cq = pytest.importorskip("cadquery")
@@ -16,10 +18,24 @@ from cadquery_simpleviewer.interactive import interactive, _make_slider
 @pytest.fixture(autouse=True)
 def _no_display():
     """Every test patches display so nothing tries to touch a real IPython
-    frontend, and patches go.Figure.show so no browser tab is opened."""
-    with patch("cadquery_simpleviewer.interactive.display") as mock_display, \
-         patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+    frontend. interactive() never calls fig.show() (it patches the chart in
+    place via Plotly.react() instead), so no browser-tab patch is needed."""
+    with patch("cadquery_simpleviewer.interactive.display") as mock_display:
         yield mock_display
+
+
+def _html_calls(mock_display):
+    return [c for c in mock_display.call_args_list
+            if c.args and isinstance(c.args[0], HTML)]
+
+
+def _js_calls(mock_display):
+    return [c for c in mock_display.call_args_list
+            if c.args and isinstance(c.args[0], Javascript)]
+
+
+def _div_id(mock_display):
+    return re.search(r"cqsv-[0-9a-f]{32}", _html_calls(mock_display)[0].args[0].data).group()
 
 
 # ── _make_slider ──────────────────────────────────────────────────────────────
@@ -108,6 +124,55 @@ def test_interactive_show_kwargs_forwarded():
 
     mesh_traces = [t for t in captured["fig"].data if isinstance(t, go.Mesh3d)]
     assert mesh_traces[0].color == "indianred"
+
+
+# ── camera preservation across redraws ──────────────────────────────────────
+
+def test_interactive_initial_render_embeds_div_id(_no_display):
+    @interactive(width=(1, 10, 1, 5))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    html_calls = _html_calls(_no_display)
+    assert len(html_calls) == 1
+    assert _div_id(_no_display)
+
+
+def test_interactive_redraw_patches_same_div_omitting_camera(_no_display):
+    @interactive(width=(1, 10, 1, 5))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    div_id = _div_id(_no_display)
+    vbox = _no_display.call_args[0][0]
+    slider = vbox.children[0].children[0]
+
+    slider.value = 8
+
+    js_calls = _js_calls(_no_display)
+    assert len(js_calls) == 1
+    source = js_calls[0].args[0].data
+    assert f'Plotly.react("{div_id}"' in source
+    assert '"camera"' not in source
+    assert '"uirevision"' in source
+
+
+def test_interactive_multiple_redraws_reuse_same_div(_no_display):
+    @interactive(width=(1, 10, 1, 5))
+    def model(width):
+        return cq.Workplane("XY").box(width, 3, 2)
+
+    div_id = _div_id(_no_display)
+    vbox = _no_display.call_args[0][0]
+    slider = vbox.children[0].children[0]
+
+    slider.value = 7
+    slider.value = 9
+
+    js_calls = _js_calls(_no_display)
+    assert len(js_calls) == 2
+    for call in js_calls:
+        assert div_id in call.args[0].data
 
 
 # ── dict return overrides ───────────────────────────────────────────────────

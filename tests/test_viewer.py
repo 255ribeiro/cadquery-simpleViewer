@@ -351,8 +351,8 @@ def test_equal_axis_ranges(box):
 
 # ── show — updatemenus ───────────────────────────────────────────────────────
 
-def test_four_updatemenus(box):
-    assert len(_capture_fig(box).layout.updatemenus) == 4
+def test_five_updatemenus(box):
+    assert len(_capture_fig(box).layout.updatemenus) == 5
 
 def test_axis_menus_are_buttons(box):
     fig = _capture_fig(box)
@@ -383,6 +383,28 @@ def test_camera_buttons_restore_aspectratio(box):
         assert ratio.get("x") == 1
         assert ratio.get("y") == 1
         assert ratio.get("z") == 1
+
+
+# ── show — reset view button ─────────────────────────────────────────────────
+
+def test_reset_view_is_button(box):
+    assert _capture_fig(box).layout.updatemenus[4].type == "buttons"
+
+def test_reset_view_label(box):
+    labels = [b.label for b in _capture_fig(box).layout.updatemenus[4].buttons]
+    assert "Reset View" in labels
+
+def test_reset_view_restores_default_camera(box):
+    button = _capture_fig(box).layout.updatemenus[4].buttons[0]
+    camera = button.args[0]["scene.camera"]
+    assert camera["eye"] == {"x": 1.5, "y": 1.5, "z": 1.5}
+    assert camera["projection"]["type"] == "perspective"
+
+def test_reset_view_restores_aspect(box):
+    button = _capture_fig(box).layout.updatemenus[4].buttons[0]
+    assert button.args[0]["scene.aspectmode"] == "manual"
+    ratio = button.args[0]["scene.aspectratio"]
+    assert ratio == {"x": 1, "y": 1, "z": 1}
 
 
 # ── show — axis visibility ───────────────────────────────────────────────────
