@@ -450,6 +450,8 @@ show(
     points_display=None,
     lines_display=None,
     export=None,
+    export_ifc=None,
+    ifc_config=None,
 )
 ```
 
@@ -470,32 +472,46 @@ show(
 | `padding` | float | `0.15` | Fraction of the bounding box span added as margin on each axis |
 | `points_display` | dict or None | `None` | Marker style for point objects. Keys: `size`, `color`, `symbol`, `opacity` |
 | `lines_display` | dict or None | `None` | Line style for edge and wire objects. Keys: `color`, `width`, `mode`, `samples`, `opacity` |
-| `export` | dict, False, or None | `None` | STEP export button config. `None` (default) shows the button, exporting in meters. `False` disables it. A dict customizes it (`filename`, `unit` — `"M"` or `"MM"`) — see [Exporting to STEP](#exporting-to-step) |
+| `export` | dict, False, or None | `None` | STEP export format config. `None` (default) offers "STEP" in the export dropdown, exporting in meters. `False` removes it from the dropdown. A dict customizes it (`filename`, `unit` — `"M"` or `"MM"`) — see [Exporting](#exporting) |
+| `export_ifc` | dict, False, or None | `None` | IFC Proxy export format config, offered alongside `export` in the same dropdown. `None` (default) offers "IFC Proxy", exporting in meters. `False` removes it. A dict customizes it the same way as `export` (`filename`, `unit`). Requires the `ifc` extra — silently omitted from the dropdown if `ifcopenshell` isn't installed — see [Exporting](#exporting) |
+| `ifc_config` | dict or None | `None` | IFC-specific settings applied whenever an IFC file is written. Currently just `schema` (default `"IFC4"`) — any schema identifier the installed `ifcopenshell` accepts (e.g. `"IFC4"`, `"IFC2X3"`, `"IFC4X3"`) — see [Exporting to IFC](#exporting-to-ifc-proxy-elements) |
 
 ### Interactive controls
 
 | Control | Action |
 |---------|--------|
+| **Export ▾ / Export** | Pick a format (STEP, IFC Proxy) from the dropdown, then click Export to write the currently shown solid(s) to disk |
 | **X ● / X ○** | Toggle X axis on or off |
 | **Y ● / Y ○** | Toggle Y axis on or off |
 | **Z ● / Z ○** | Toggle Z axis on or off |
 | **Camera** | Switch between Perspective and Orthographic projection |
-| **Export STEP** | Write the currently shown solid(s) to a STEP file on disk |
 | Left drag | Orbit |
 | Scroll | Zoom |
 | Right drag | Pan |
 
 ---
 
-## Exporting to STEP
+## Exporting
 
-Both `show()` and `interactive()` display an **Export STEP** button by default, right below the figure. Clicking it writes the model's solid object(s) to a STEP file on disk (in the notebook's working directory by default) and prints a confirmation — or an error — below the button.
+Both `show()` and `interactive()` display an **Export** row by default, right above the figure, right-aligned: a format dropdown plus a single **Export** button. The dropdown lists whichever formats are currently enabled — "STEP" by default, plus "IFC Proxy" if `ifcopenshell` is installed and not disabled — with "STEP" selected initially. Pick a format, click Export, and the model's solid object(s) are written to disk (in the notebook's working directory by default), printing a confirmation — or an error — next to the button. Adding a format later never removes an existing one; disabling a format (`export=False` / `export_ifc=False`) just removes its option from the dropdown, and if no formats are enabled at all, the whole row is omitted.
 
 ```python
-show(box)  # "Export STEP" button writes ./model.step on click
+show(box)  # "Export" row offers "STEP"; click Export to write ./model.step
 ```
 
-Customize the output path or unit with a dict, or turn the button off entirely with `False`:
+For `interactive()`, pass `export`/`export_ifc` inside `show_kwargs`. Clicking Export always exports the object(s) built from the sliders' **current** values, not the values at the time the decorator ran:
+
+```python
+@interactive(width=(1, 10, 0.5, 5), show_kwargs=dict(export=dict(filename="box.step")))
+def model(width):
+    return cq.Workplane("XY").box(width, 3, 2)
+```
+
+The export row requires `ipywidgets` (see the `interactive` extra above); if it isn't installed, `show()` falls back to its normal behavior with no row — `interactive()` itself already requires `ipywidgets` regardless of export.
+
+### Exporting to STEP
+
+Customize the output path or unit with a dict, or remove the "STEP" option from the dropdown entirely with `False`:
 
 ```python
 show(box, export=dict(filename="parts/bracket.step"))
@@ -509,15 +525,49 @@ The exported file is declared in **meters** by default (`unit="M"`) — pass `un
 
 Only solid objects are exported — edges, wires, and plain points are skipped. If `objects` contains several solids from the same library (CadQuery or build123d), they're combined into a single compound in the STEP file. Mixing CadQuery and build123d solids in the same call raises an error, since they can't be combined into one compound.
 
-For `interactive()`, pass `export` inside `show_kwargs`. Clicking the button always exports the object(s) built from the sliders' **current** values, not the values at the time the decorator ran:
+### Exporting to IFC (proxy elements)
+
+For BIM programs that handle IFC better than STEP, `export_ifc` writes each solid as its own minimal `IfcBuildingElementProxy` — geometry and a name only, no property sets, materials, or type objects:
 
 ```python
-@interactive(width=(1, 10, 0.5, 5), show_kwargs=dict(export=dict(filename="box.step")))
+show(box, export_ifc=dict(filename="parts/bracket.ifc"))
+show(box, export_ifc=dict(unit="MM"))  # IFC file declared in millimeters instead
+show(box, export_ifc=False)
+```
+
+`unit` works exactly like `export`'s — a label only, declaring the file's `IfcSIUnit` prefix without rescaling the coordinates.
+
+This diverges from STEP export in two ways:
+
+- **One proxy per solid, not one compound.** Each object in `objects` becomes its own independent `IfcBuildingElementProxy`, staying individually selectable/schedulable in the BIM program, instead of being merged into a single compound.
+- **CadQuery and build123d solids can be freely mixed in one call.** Since there's no compound to build, there's nothing to conflict — unlike `export_step()`, mixing kernels does not raise.
+
+Geometry is written as a **tessellated mesh** (the same `tessellation_tolerance`/`angular_tolerance`-driven triangulation already used to render the 3D view), not an exact BREP solid — `ifcopenshell`'s Python API has no supported path for writing arbitrary OCCT BRep shapes as exact IFC solids. Expect faceted, not exactly-curved, geometry when reopening in Revit/ArchiCAD, the same visual tradeoff already made for the on-screen Plotly view.
+
+The file gets only the spatial scaffolding an IFC file needs to be structurally valid (`IfcProject → IfcSite → IfcBuilding → IfcBuildingStorey`, with every proxy contained in that one storey) — no property sets, no materials, no type objects. Imported elements carry geometry and a name only; don't expect schedulable BIM data beyond that, by design.
+
+By default the file is written as **IFC4**. Pass `ifc_config=dict(schema=...)` to write a different schema instead — any identifier the installed `ifcopenshell` accepts, e.g. `"IFC2X3"` for older tools that don't yet read IFC4:
+
+```python
+show(box, ifc_config=dict(schema="IFC2X3"))
+```
+
+For `interactive()`, pass `ifc_config` inside `show_kwargs` alongside `export_ifc`:
+
+```python
+@interactive(width=(1, 10, 0.5, 5),
+             show_kwargs=dict(export_ifc=dict(filename="box.ifc"), ifc_config=dict(schema="IFC2X3")))
 def model(width):
     return cq.Workplane("XY").box(width, 3, 2)
 ```
 
-The export button requires `ipywidgets` (see the `interactive` extra above); if it isn't installed, `show()` falls back to its normal behavior with no button — `interactive()` itself already requires `ipywidgets` regardless of export.
+IFC export requires `ifcopenshell`, installed via the `ifc` extra (or included in `[all]`):
+
+```bash
+pip install "cadquery-simpleviewer[ifc]"
+```
+
+If `ifcopenshell` isn't installed, "IFC Proxy" is silently omitted from the dropdown — `show()`/`interactive()` still work normally with STEP export (or no export row at all if both formats are disabled or unavailable).
 
 ## Pixi environment example
 

@@ -64,6 +64,7 @@ def rect_wire():
 def _capture_fig(obj, **kwargs):
     captured = {}
     kwargs.setdefault("export", False)
+    kwargs.setdefault("export_ifc", False)
 
     def fake_show(self):
         captured["fig"] = self
@@ -424,24 +425,25 @@ def test_xyz_shows_all(box):
     assert fig.layout.scene.zaxis.showbackground == True
 
 
-# ── show — export button ─────────────────────────────────────────────────────
+# ── show — export dropdown/button ────────────────────────────────────────────
 
-def test_show_default_export_displays_button_and_status(box):
+def test_show_default_export_displays_dropdown_and_button(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
          patch("cadquery_simpleviewer.viewer.display") as mock_display:
-        show(box)
+        show(box, export_ifc=False)
 
-    vbox = mock_display.call_args[0][0]
-    assert isinstance(vbox, widgets.HBox)
-    button, status = vbox.children
+    export_widget = mock_display.call_args[0][0]
+    assert isinstance(export_widget, widgets.HBox)
+    dropdown, button, status = export_widget.children
+    assert dropdown.options == ("STEP",)
     assert isinstance(button, widgets.Button)
-    assert button.description == "Export STEP"
+    assert button.description == "Export"
     assert isinstance(status, widgets.Output)
 
-def test_show_export_false_skips_button(box):
+def test_show_export_false_skips_widget(box):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
          patch("cadquery_simpleviewer.viewer.display") as mock_display:
-        show(box, export=False)
+        show(box, export=False, export_ifc=False)
 
     mock_display.assert_not_called()
 
@@ -453,15 +455,26 @@ def test_show_export_missing_ipywidgets_falls_back_silently(box):
 
     mock_display.assert_not_called()
 
+def test_show_export_ifc_offered_alongside_step(box):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display, \
+         patch("cadquery_simpleviewer.viewer._ifcopenshell_available", lambda: True):
+        show(box)
+
+    export_widget = mock_display.call_args[0][0]
+    dropdown, _button, _status = export_widget.children
+    assert dropdown.options == ("STEP", "IFC Proxy")
+    assert dropdown.value == "STEP"
+
 def test_show_export_button_click_writes_step_file(tmp_path, box):
     target = tmp_path / "exported.step"
 
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
          patch("cadquery_simpleviewer.viewer.display") as mock_display:
-        show(box, export=dict(filename=str(target)))
+        show(box, export=dict(filename=str(target)), export_ifc=False)
 
-    vbox = mock_display.call_args[0][0]
-    button, _status = vbox.children
+    export_widget = mock_display.call_args[0][0]
+    _dropdown, button, _status = export_widget.children
     button.click()
 
     assert target.exists()
@@ -469,10 +482,51 @@ def test_show_export_button_click_writes_step_file(tmp_path, box):
 def test_show_export_button_click_reports_failure(tmp_path, straight_edge, capsys):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
          patch("cadquery_simpleviewer.viewer.display") as mock_display:
-        show(straight_edge, export=dict(filename=str(tmp_path / "edge.step")))
+        show(straight_edge, export=dict(filename=str(tmp_path / "edge.step")), export_ifc=False)
 
-    vbox = mock_display.call_args[0][0]
-    button, _status = vbox.children
+    export_widget = mock_display.call_args[0][0]
+    _dropdown, button, _status = export_widget.children
     button.click()
 
     assert "Export failed" in capsys.readouterr().out
+
+def test_show_export_ifc_selected_calls_export_ifc_proxy(box):
+    calls = []
+
+    def fake_export_ifc_proxy(*a, **kw):
+        calls.append((a, kw))
+        return "model.ifc"
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display, \
+         patch("cadquery_simpleviewer.viewer._ifcopenshell_available", lambda: True), \
+         patch("cadquery_simpleviewer.viewer.export_ifc_proxy", fake_export_ifc_proxy):
+        show(box, export=False)
+
+        export_widget = mock_display.call_args[0][0]
+        dropdown, button, _status = export_widget.children
+        dropdown.value = "IFC Proxy"
+        button.click()
+
+    assert len(calls) == 1
+    assert calls[0][1]["schema"] == "IFC4"
+
+def test_show_ifc_config_schema_forwarded_to_export_ifc_proxy(box):
+    calls = []
+
+    def fake_export_ifc_proxy(*a, **kw):
+        calls.append((a, kw))
+        return "model.ifc"
+
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"), \
+         patch("cadquery_simpleviewer.viewer.display") as mock_display, \
+         patch("cadquery_simpleviewer.viewer._ifcopenshell_available", lambda: True), \
+         patch("cadquery_simpleviewer.viewer.export_ifc_proxy", fake_export_ifc_proxy):
+        show(box, export=False, ifc_config=dict(schema="IFC2X3"))
+
+        export_widget = mock_display.call_args[0][0]
+        dropdown, button, _status = export_widget.children
+        dropdown.value = "IFC Proxy"
+        button.click()
+
+    assert calls[0][1]["schema"] == "IFC2X3"

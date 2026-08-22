@@ -81,7 +81,8 @@ def test_interactive_returns_original_function():
 
 
 def test_interactive_builds_one_slider_per_control(_no_display):
-    @interactive(width=(1, 10), height=(1, 8))
+    @interactive(width=(1, 10), height=(1, 8),
+                 show_kwargs=dict(export=False, export_ifc=False))
     def model(width, height):
         return cq.Workplane("XY").box(width, height, 2)
 
@@ -139,7 +140,7 @@ def test_interactive_initial_render_embeds_div_id(_no_display):
 
 
 def test_interactive_redraw_patches_same_div_omitting_camera(_no_display):
-    @interactive(width=(1, 10, 1, 5))
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=False, export_ifc=False))
     def model(width):
         return cq.Workplane("XY").box(width, 3, 2)
 
@@ -158,7 +159,7 @@ def test_interactive_redraw_patches_same_div_omitting_camera(_no_display):
 
 
 def test_interactive_multiple_redraws_reuse_same_div(_no_display):
-    @interactive(width=(1, 10, 1, 5))
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=False, export_ifc=False))
     def model(width):
         return cq.Workplane("XY").box(width, 3, 2)
 
@@ -288,26 +289,50 @@ def _vbox_children(mock_display):
     return mock_display.call_args[0][0].children
 
 
-def test_interactive_default_export_adds_button_and_status(_no_display):
-    @interactive(width=(1, 10, 1, 5))
+def _export_widget_parts(mock_display):
+    """The export widget (HBox: Dropdown, Button, Output) is prepended as
+    the first child of the outer VBox whenever at least one export format
+    is enabled."""
+    export_widget = _vbox_children(mock_display)[0]
+    dropdown, button, status = export_widget.children
+    return dropdown, button, status
+
+
+def test_interactive_default_export_adds_dropdown_and_button(_no_display):
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export_ifc=False))
     def model(width):
         return cq.Workplane("XY").box(width, 3, 2)
 
     children = _vbox_children(_no_display)
-    assert len(children) == 5
-    export_button, export_status = children[3], children[4]
-    assert isinstance(export_button, widgets.Button)
-    assert export_button.description == "Export STEP"
-    assert isinstance(export_status, widgets.Output)
+    assert len(children) == 4
+    dropdown, button, status = _export_widget_parts(_no_display)
+    assert dropdown.options == ("STEP",)
+    assert isinstance(button, widgets.Button)
+    assert button.description == "Export"
+    assert isinstance(status, widgets.Output)
 
 
-def test_interactive_export_false_skips_button(_no_display):
-    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=False))
+def test_interactive_export_false_skips_widget(_no_display):
+    @interactive(width=(1, 10, 1, 5), show_kwargs=dict(export=False, export_ifc=False))
     def model(width):
         return cq.Workplane("XY").box(width, 3, 2)
 
     children = _vbox_children(_no_display)
     assert len(children) == 3
+
+
+def test_interactive_export_ifc_offered_alongside_step(_no_display):
+    # patch(), not monkeypatch.setattr() — see test_interactive_missing_
+    # ipywidgets_raises_import_error's comment on why the dotted string
+    # must go through the module path directly.
+    with patch("cadquery_simpleviewer.interactive._ifcopenshell_available", lambda: True):
+        @interactive(width=(1, 10, 1, 5))
+        def model(width):
+            return cq.Workplane("XY").box(width, 3, 2)
+
+    dropdown, _button, _status = _export_widget_parts(_no_display)
+    assert dropdown.options == ("STEP", "IFC Proxy")
+    assert dropdown.value == "STEP"
 
 
 def test_interactive_export_uses_current_slider_value(tmp_path, _no_display):
@@ -320,8 +345,8 @@ def test_interactive_export_uses_current_slider_value(tmp_path, _no_display):
         return cq.Workplane("XY").box(width, 3, 2)
 
     vbox = _no_display.call_args[0][0]
-    slider = vbox.children[0].children[0]
-    export_button = vbox.children[3]
+    slider = vbox.children[1].children[0]
+    _dropdown, export_button, _status = _export_widget_parts(_no_display)
 
     slider.value = 8
     export_button.click()
@@ -340,8 +365,7 @@ def test_interactive_export_dict_return_uses_overridden_objects(tmp_path, _no_di
             return {"objects": box, "colors": ["indianred"]}
         return box
 
-    vbox = _no_display.call_args[0][0]
-    export_button = vbox.children[3]
+    _dropdown, export_button, _status = _export_widget_parts(_no_display)
 
     export_button.click()
 
@@ -354,9 +378,49 @@ def test_interactive_export_button_click_reports_failure(_no_display, capsys):
     def model(width):
         return cq.Edge.makeLine(cq.Vector(0, 0, 0), cq.Vector(width, 0, 0))
 
-    vbox = _no_display.call_args[0][0]
-    export_button = vbox.children[3]
+    _dropdown, export_button, _status = _export_widget_parts(_no_display)
 
     export_button.click()
 
     assert "Export failed" in capsys.readouterr().out
+
+
+def test_interactive_export_ifc_selected_calls_export_ifc_proxy(tmp_path, _no_display):
+    calls = []
+
+    def fake_export_ifc_proxy(*a, **kw):
+        calls.append((a, kw))
+        return "model.ifc"
+
+    with patch("cadquery_simpleviewer.interactive._ifcopenshell_available", lambda: True), \
+         patch("cadquery_simpleviewer.interactive.export_ifc_proxy", fake_export_ifc_proxy):
+        @interactive(width=(1, 10, 1, 5))
+        def model(width):
+            return cq.Workplane("XY").box(width, 3, 2)
+
+        dropdown, export_button, _status = _export_widget_parts(_no_display)
+        dropdown.value = "IFC Proxy"
+        export_button.click()
+
+    assert len(calls) == 1
+    assert calls[0][1]["schema"] == "IFC4"
+
+
+def test_interactive_ifc_config_schema_forwarded_to_export_ifc_proxy(tmp_path, _no_display):
+    calls = []
+
+    def fake_export_ifc_proxy(*a, **kw):
+        calls.append((a, kw))
+        return "model.ifc"
+
+    with patch("cadquery_simpleviewer.interactive._ifcopenshell_available", lambda: True), \
+         patch("cadquery_simpleviewer.interactive.export_ifc_proxy", fake_export_ifc_proxy):
+        @interactive(width=(1, 10, 1, 5), show_kwargs=dict(ifc_config=dict(schema="IFC2X3")))
+        def model(width):
+            return cq.Workplane("XY").box(width, 3, 2)
+
+        dropdown, export_button, _status = _export_widget_parts(_no_display)
+        dropdown.value = "IFC Proxy"
+        export_button.click()
+
+    assert calls[0][1]["schema"] == "IFC2X3"

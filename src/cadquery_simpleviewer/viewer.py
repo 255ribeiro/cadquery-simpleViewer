@@ -2,6 +2,10 @@ import plotly.graph_objects as go
 from .adapters import get_adapter
 from .plane import _base_plane
 from .exporter import resolve_export_config, export_step
+from .ifc_exporter import (
+    resolve_ifc_export_config, resolve_ifc_config, export_ifc_proxy, _ifcopenshell_available,
+)
+from ._export_ui import build_export_widget
 from ._optional_widgets import widgets, display, clear_output, enable_colab_custom_widget_manager
 
 _DEFAULT_COLORS = [
@@ -541,6 +545,8 @@ def show(
     points_display=None,
     lines_display=None,
     export=None,
+    export_ifc=None,
+    ifc_config=None,
 ):
     """
     Display one or more CadQuery and/or build123d objects as an interactive
@@ -597,21 +603,45 @@ def show(
                                           (default 50). Increase for tight curves,
                                           helices, or complex splines.
                                 opacity — line opacity (default 1.0)
-    export                  : STEP export button config — on by default (a
-                              button labeled "Export STEP" is shown below
-                              the figure, writing "model.step" to the
-                              current working directory, in meters, on
-                              click). Pass a dict to customize, e.g.
-                              export=dict(filename="my_part.step",
-                              unit="MM"), or export=False to disable it.
+    export                  : STEP export format config — on by default (an
+                              "Export" dropdown+button row is shown above
+                              the figure, offering "STEP" as a format;
+                              writes "model.step" to the current working
+                              directory, in meters, on click). Pass a dict
+                              to customize, e.g. export=dict(
+                              filename="my_part.step", unit="MM"), or
+                              export=False to disable the STEP option.
                               "unit" accepts "M" (default) or "MM". Only
                               solid objects are exported (edges/wires/points
                               are skipped); multiple solids are combined
                               into one compound; mixing CadQuery and
                               build123d solids in one call raises an error.
-                              Requires ipywidgets — silently skipped if it
-                              isn't installed (install the "interactive"
+                              Requires ipywidgets — the export row is
+                              silently skipped if it isn't installed
+                              (install the "interactive" extra).
+    export_ifc               : IFC export format config — adds "IFC Proxy"
+                              as a second option in the same "Export"
+                              dropdown+button row (see `export` above).
+                              None (default) enables it, writing
+                              "model.ifc" in meters on click; a dict
+                              customizes it the same way as `export`
+                              (filename, unit); export_ifc=False disables
+                              it. Unlike STEP, each solid becomes its own
+                              independent IfcBuildingElementProxy (not
+                              merged into a compound), so CadQuery and
+                              build123d solids can be freely mixed in one
+                              call. Geometry is a tessellated mesh, not an
+                              exact BREP solid. Requires ifcopenshell — the
+                              option is silently omitted from the dropdown
+                              if it isn't installed (install the "ifc"
                               extra).
+    ifc_config                : dict of IFC-specific settings applied
+                              whenever an IFC file is written via the
+                              "IFC Proxy" export option — currently just
+                              "schema" (default "IFC4"), any schema
+                              identifier the installed ifcopenshell
+                              accepts (e.g. "IFC4", "IFC2X3", "IFC4X3").
+                              None (default) uses "IFC4".
     """
     fig = _build_figure(
         objects, names, colors, opacity, visible_axes, z,
@@ -619,22 +649,29 @@ def show(
         tessellation_tolerance, angular_tolerance, flat_shading,
         padding, points_display, lines_display,
     )
-    fig.show()
 
     export_cfg = resolve_export_config(export)
-    if export_cfg is not None and widgets is not None:
+    export_ifc_cfg = resolve_ifc_export_config(export_ifc)
+    ifc_cfg = resolve_ifc_config(ifc_config)
+
+    formats = []
+    if export_cfg is not None:
+        formats.append(
+            ("STEP", lambda: export_step(objects, export_cfg["filename"], export_cfg["unit"]))
+        )
+    if export_ifc_cfg is not None and _ifcopenshell_available():
+        formats.append((
+            "IFC Proxy",
+            lambda: export_ifc_proxy(
+                objects, export_ifc_cfg["filename"], names=names, unit=export_ifc_cfg["unit"],
+                schema=ifc_cfg["schema"],
+                tessellation_tolerance=tessellation_tolerance, angular_tolerance=angular_tolerance,
+            ),
+        ))
+
+    export_widget = build_export_widget(formats) if widgets is not None else None
+    if export_widget is not None:
         enable_colab_custom_widget_manager()
-        button = widgets.Button(description="Export STEP", icon="download")
-        status = widgets.Output()
+        display(export_widget)
 
-        def _on_click(_btn):
-            with status:
-                clear_output(wait=True)
-                try:
-                    path = export_step(objects, export_cfg["filename"], export_cfg["unit"])
-                    print(f"Exported to {path}")
-                except Exception as exc:
-                    print(f"Export failed: {exc}")
-
-        button.on_click(_on_click)
-        display(widgets.HBox([button, status]))
+    fig.show()

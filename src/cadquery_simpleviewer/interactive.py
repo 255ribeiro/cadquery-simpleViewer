@@ -6,6 +6,10 @@ from plotly.utils import PlotlyJSONEncoder
 
 from .viewer import _build_figure
 from .exporter import resolve_export_config, export_step
+from .ifc_exporter import (
+    resolve_ifc_export_config, resolve_ifc_config, export_ifc_proxy, _ifcopenshell_available,
+)
+from ._export_ui import build_export_widget
 from ._optional_widgets import (
     widgets, display, clear_output, HTML, Javascript,
     enable_colab_custom_widget_manager,
@@ -108,13 +112,17 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                           visible_axes, z, plane_color, plane_size,
                           plane_opacity, tessellation_tolerance,
                           angular_tolerance, flat_shading, padding,
-                          points_display, lines_display), plus "export"
-                          (see show()'s `export` parameter) — on by
-                          default, and always exports the object(s) built
-                          from the sliders' *current* values at the moment
-                          the button is clicked, not the initial render.
-                          Kept separate from **controls so it can never
-                          collide with a model parameter name.
+                          points_display, lines_display), plus "export",
+                          "export_ifc", and "ifc_config" (see show()'s
+                          `export`, `export_ifc`, and `ifc_config`
+                          parameters) — the export formats are offered
+                          together as options in one "Export"
+                          dropdown+button row, and always export the
+                          object(s) built from the sliders' *current*
+                          values at the moment the button is clicked, not
+                          the initial render. Kept separate from
+                          **controls so they can never collide with a
+                          model parameter name.
     continuous_update   : applied to every generated slider — False
                           (default) rebuilds only when the slider is
                           released, since a CAD rebuild + tessellation
@@ -139,6 +147,8 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
 
     show_kwargs = dict(show_kwargs) if show_kwargs else {}
     export_cfg = resolve_export_config(show_kwargs.pop("export", None))
+    export_ifc_cfg = resolve_ifc_export_config(show_kwargs.pop("export_ifc", None))
+    ifc_cfg = resolve_ifc_config(show_kwargs.pop("ifc_config", None))
     figure_kwargs = dict(
         names=None, colors=None, opacity=1.0, visible_axes="xyz", z=None,
         plane_color="whitesmoke", plane_size=50, plane_opacity=0.8,
@@ -238,29 +248,36 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
             slider.observe(_redraw, names="value")
         _redraw()
 
-        vbox_children = [widgets.VBox(list(sliders.values())), plot_output, js_output]
+        def _current_export_objects():
+            values = {name: slider.value for name, slider in sliders.items()}
+            result = build_fn(**values)
+            return result["objects"] if isinstance(result, dict) else result
 
+        formats = []
         if export_cfg is not None:
-            export_button = widgets.Button(description="Export STEP", icon="download")
-            export_status = widgets.Output()
+            formats.append((
+                "STEP",
+                lambda: export_step(
+                    _current_export_objects(), export_cfg["filename"], export_cfg["unit"]
+                ),
+            ))
+        if export_ifc_cfg is not None and _ifcopenshell_available():
+            formats.append((
+                "IFC Proxy",
+                lambda: export_ifc_proxy(
+                    _current_export_objects(), export_ifc_cfg["filename"],
+                    names=figure_kwargs["names"], unit=export_ifc_cfg["unit"],
+                    schema=ifc_cfg["schema"],
+                    tessellation_tolerance=figure_kwargs["tessellation_tolerance"],
+                    angular_tolerance=figure_kwargs["angular_tolerance"],
+                ),
+            ))
 
-            def _on_export_click(_btn):
-                values = {name: slider.value for name, slider in sliders.items()}
-                result = build_fn(**values)
-                export_objects = result["objects"] if isinstance(result, dict) else result
-
-                with export_status:
-                    clear_output(wait=True)
-                    try:
-                        path = export_step(
-                            export_objects, export_cfg["filename"], export_cfg["unit"]
-                        )
-                        print(f"Exported to {path}")
-                    except Exception as exc:
-                        print(f"Export failed: {exc}")
-
-            export_button.on_click(_on_export_click)
-            vbox_children.extend([export_button, export_status])
+        export_widget = build_export_widget(formats)
+        vbox_children = (
+            ([export_widget] if export_widget is not None else [])
+            + [widgets.VBox(list(sliders.values())), plot_output, js_output]
+        )
 
         enable_colab_custom_widget_manager()
         display(widgets.VBox(vbox_children))
