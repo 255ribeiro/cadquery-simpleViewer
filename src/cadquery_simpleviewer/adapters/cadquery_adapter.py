@@ -48,6 +48,18 @@ def is_location(obj):
     return isinstance(obj, (cq.occ_impl.geom.Location, cq.occ_impl.geom.Plane))
 
 
+def object_location(obj):
+    """
+    The placement Location of a Workplane's current solid (or a bare
+    Shape), for drawing its automatic local axis triad — mirrors
+    tessellate_solid()'s obj.val() so the triad matches the same solid
+    that got tessellated.
+    """
+    import cadquery as cq
+    shape = obj.val() if isinstance(obj, cq.Workplane) else obj
+    return shape.location()
+
+
 def location_axes(obj, scale):
     """
     Return (origin, x_tip, y_tip, z_tip) for a cq.Location or cq.Plane —

@@ -96,6 +96,14 @@ def sample_wire(wire, samples):
     return x, y, z
 
 
+def object_location(obj):
+    """
+    The placement Location of a build123d Shape (Part/Sketch/Solid/
+    Compound), for drawing its automatic local axis triad.
+    """
+    return obj.location
+
+
 def location_axes(obj, scale):
     """
     Return (origin, x_tip, y_tip, z_tip) for a build123d Location, Plane,

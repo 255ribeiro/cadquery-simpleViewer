@@ -120,10 +120,23 @@ def _build_traces(objects, names, colors, opacity,
     Build Plotly traces from a mixed list of CadQuery and/or build123d objects.
 
     Solid (CadQuery Workplane / build123d Part, Sketch, Solid, Compound)
-                                       → go.Mesh3d  (tessellated)
+                                       → go.Mesh3d (tessellated), plus an
+                                         automatic lighter-tint RGB axis
+                                         triad at the solid's own placement
+                                         Location (adapters.object_location())
+                                         — no Location/Plane/Axis needs to
+                                         be passed in separately for this.
+                                         Identity (i.e. no .moved()/Pos()
+                                         applied) means the triad sits at
+                                         the world origin, coinciding with
+                                         the world triad.
     Edge / Wire                       → go.Scatter3d (sampled lines)
     Vector / [x, y, z]                → go.Scatter3d (markers)
-    Location / Plane / Axis           → go.Mesh3d (lighter-tint RGB axis triad)
+    Location / Plane / Axis           → go.Mesh3d (lighter-tint RGB axis
+                                         triad) — an explicit triad at that
+                                         object's own frame, for marking a
+                                         location not tied to any solid in
+                                         `objects`
 
     Which library an object belongs to is resolved per-object via
     adapters.get_adapter(), so CadQuery and build123d objects can be
@@ -271,6 +284,24 @@ def _build_traces(objects, names, colors, opacity,
                 lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
             ))
 
+            # Triad at the solid's own placement Location — automatic, no
+            # Location/Plane/Axis needs to be passed in separately.
+            origin, x_tip, y_tip, z_tip = adapter.location_axes(
+                adapter.object_location(obj), axes_scale
+            )
+
+            start = len(traces)
+            traces.extend(_local_axis_traces(
+                origin, x_tip, y_tip, z_tip, visible=local_axes_visible
+            ))
+            local_axis_trace_indices.extend(range(start, len(traces)))
+
+            if local_axes_visible:
+                for point in (origin, x_tip, y_tip, z_tip):
+                    all_x.append(point[0])
+                    all_y.append(point[1])
+                    all_z.append(point[2])
+
     return traces, all_x, all_y, all_z, local_axis_trace_indices
 
 
@@ -386,13 +417,19 @@ def _make_trace_toggle(label, indices, initial_visible, x_pos):
     world-origin or local-axes triads.
 
     `indices` may be empty (e.g. no Location/Plane objects were passed to
-    show()) — the button is still shown for a consistent header layout.
-    Plotly.restyle treats an *empty* trace-index list as "all traces"
-    rather than "no traces", so restyling with `[]` would wipe the whole
-    figure (geometry included) instead of doing nothing — method="skip"
-    is Plotly's real no-op, used here whenever there's nothing to toggle.
+    show()) — the button is still shown for a consistent header layout,
+    but greyed out and labeled "(none)" so it doesn't look like a live
+    toggle that just silently fails to do anything — a real point of
+    confusion, since nothing about a plain enabled-looking button hints
+    that there's nothing for it to control. Plotly.restyle treats an
+    *empty* trace-index list as "all traces" rather than "no traces", so
+    restyling with `[]` would wipe the whole figure (geometry included)
+    instead of doing nothing — method="skip" is Plotly's real no-op, used
+    here whenever there's nothing to toggle.
     """
-    method = "restyle" if indices else "skip"
+    has_traces = bool(indices)
+    method = "restyle" if has_traces else "skip"
+    suffix = "" if has_traces else " (none)"
 
     return dict(
         type="buttons",
@@ -401,19 +438,19 @@ def _make_trace_toggle(label, indices, initial_visible, x_pos):
         y=1.13,
         xanchor="left",
         yanchor="top",
-        showactive=True,
-        active=0 if initial_visible else 1,
-        bgcolor="white",
+        showactive=has_traces,
+        active=(0 if initial_visible else 1) if has_traces else -1,
+        bgcolor="white" if has_traces else "whitesmoke",
         bordercolor="lightgray",
-        font=dict(size=11),
+        font=dict(size=11, color="black" if has_traces else "lightgray"),
         buttons=[
             dict(
-                label=f"{label} ●",
+                label=f"{label} ●{suffix}",
                 method=method,
                 args=[{"visible": True}, indices]
             ),
             dict(
-                label=f"{label} ○",
+                label=f"{label} ○{suffix}",
                 method=method,
                 args=[{"visible": False}, indices]
             ),
@@ -642,15 +679,23 @@ def show(
     Accepts a mixed list of object types in any combination, from either
     library, in the same call:
       - Solid (CadQuery Workplane / build123d Part, Sketch, Solid, Compound)
-                                    → tessellated mesh
+                                    → tessellated mesh, plus an automatic
+                                      light-tint red/green/blue axis triad
+                                      at the solid's own placement Location
+                                      — no Location needs to be passed in
+                                      for this, just show(part); identity
+                                      (no .moved()/Pos() applied) puts the
+                                      triad at the world origin; see
+                                      `axes_scale`/`local_axes_visible`
       - Edge / Wire                → sampled line (works with straight lines,
                                       arcs, ellipses, splines, helices, etc.)
       - Vector / [x, y, z]         → point marker
       - Location / Plane / (build123d) Axis
                                     → light-tint red/green/blue axis triad
                                       at that location, e.g. show([part,
-                                      part.location]) — opt-in per object,
-                                      see `axes_scale`/`local_axes_visible`
+                                      some_other_plane]) — for marking a
+                                      location not tied to any solid in
+                                      `objects`
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
@@ -710,13 +755,26 @@ def show(
                               gl3d limitation with dynamically hiding
                               Mesh3d traces. Default to False and only
                               switch it on when you need it.
-    local_axes_visible        : initial visibility of any per-object axis
-                              triads (see below). Only matters if `objects`
-                              contains at least one Location/Plane/Axis.
-                              Default False. A "Local Axes" button is
-                              always shown in the header to toggle all of
-                              them together — same on-reliable/off-unreliable
-                              caveat as `world_axes` above.
+    local_axes_visible        : initial visibility of the per-object axis
+                              triads — one is drawn automatically at the
+                              placement Location of every solid in
+                              `objects` (no Location/Plane/Axis needs to be
+                              passed in separately), plus one for each
+                              explicit Location/Plane/Axis object, if any.
+                              A solid's own Location is identity — placing
+                              its triad at the world origin — unless it was
+                              positioned via .moved()/Pos()/similar; a
+                              solid built in place (e.g. straight out of
+                              BuildPart, or after a boolean op) reports an
+                              identity Location even though its geometry
+                              sits elsewhere. Default
+                              False. A "Local Axes" button is always shown
+                              in the header to toggle all of them together
+                              — greyed out with a "(none)" label if
+                              `objects` has no solids or explicit
+                              Location/Plane/Axis to toggle. Same on-
+                              reliable/off-unreliable caveat as
+                              `world_axes` above.
     export                  : STEP export format config — on by default (an
                               "Export" dropdown+button row is shown above
                               the figure, offering "STEP" as a format;

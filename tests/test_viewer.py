@@ -239,20 +239,27 @@ def test_build_traces_edge_contributes_to_bbox(straight_edge):
     assert max(all_x) >= 5.0
 
 def test_build_traces_mixed_solid_edge_wire(box, straight_edge, rect_wire):
+    """
+    Each solid also gets an automatic 3-trace local-axis triad (see
+    test_axes.py) immediately after its mesh trace.
+    """
     traces, *_ = _build_traces(
         [box, straight_edge, rect_wire], None, None, 1.0, 0.1, None, None
     )
-    assert len(traces) == 3
+    assert len(traces) == 6
     assert isinstance(traces[0], go.Mesh3d)
-    assert isinstance(traces[1], go.Scatter3d)
-    assert isinstance(traces[2], go.Scatter3d)
+    assert all(isinstance(t, go.Mesh3d) for t in traces[1:4])
+    assert isinstance(traces[4], go.Scatter3d)
+    assert isinstance(traces[5], go.Scatter3d)
 
 def test_build_traces_mesh_color_index_skips_edges(box, straight_edge, cylinder):
     """Edge and wire objects must not consume mesh color palette slots."""
     traces, *_ = _build_traces(
         [box, straight_edge, cylinder], None, None, 1.0, 0.1, None, None
     )
-    mesh_colors = [t.color for t in traces if isinstance(t, go.Mesh3d)]
+    # Only the solids' own mesh traces carry a `name` — the automatic
+    # local-axis triads don't, so this excludes them from the comparison.
+    mesh_colors = [t.color for t in traces if isinstance(t, go.Mesh3d) and t.name]
     assert mesh_colors[0] != mesh_colors[1]
 
 
@@ -486,6 +493,74 @@ def test_build_traces_build123d_location_supported(b3d_location):
     assert len(traces) == 3
     assert traces[0].x[0] == 4
 
+
+# ── automatic per-solid local axis triad ────────────────────────────────────
+
+def test_build_traces_solid_gets_automatic_local_axis(box):
+    """No Location/Plane/Axis needs to be passed for a solid's own triad."""
+    traces, *_, local_axis_indices = _build_traces(
+        [box], None, None, 1.0, 0.1, None, None
+    )
+    assert len(traces) == 4
+    assert isinstance(traces[0], go.Mesh3d) and traces[0].name is not None
+    assert local_axis_indices == [1, 2, 3]
+    assert all(isinstance(traces[i], go.Mesh3d) for i in local_axis_indices)
+
+def test_build_traces_solid_local_axis_at_identity_location(box):
+    """box() is untransformed, so its placement Location is identity."""
+    traces, *_ = _build_traces([box], None, None, 1.0, 0.1, None, None, axes_scale=1)
+    x_axis_trace = traces[1]
+    assert x_axis_trace.x[0] == pytest.approx(0.0)
+    assert x_axis_trace.y[0] == pytest.approx(0.0)
+    assert x_axis_trace.z[0] == pytest.approx(0.0)
+
+def test_build_traces_solid_local_axis_follows_workplane_origin():
+    """A Workplane built at a non-origin origin= reports that as its Location."""
+    offset_box = cq.Workplane("XY", origin=(6, 4, 0)).box(5, 3, 2)
+    traces, *_ = _build_traces([offset_box], None, None, 1.0, 0.1, None, None, axes_scale=1)
+    x_axis_trace = traces[1]
+    assert x_axis_trace.x[0] == pytest.approx(6.0)
+    assert x_axis_trace.y[0] == pytest.approx(4.0)
+    assert x_axis_trace.z[0] == pytest.approx(0.0)
+
+def test_build_traces_solid_local_axis_is_not_bbox_center():
+    """
+    .translate() bakes the move into the geometry itself rather than the
+    shape's placement Location, so the automatic triad — which follows
+    Location, not the bounding box — stays at the world origin even though
+    the solid's bounding box has moved.
+    """
+    moved_box = cq.Workplane("XY").box(5, 3, 2).translate((6, 4, 0))
+    traces, *_ = _build_traces([moved_box], None, None, 1.0, 0.1, None, None, axes_scale=1)
+    x_axis_trace = traces[1]
+    assert x_axis_trace.x[0] == pytest.approx(0.0)
+    assert x_axis_trace.y[0] == pytest.approx(0.0)
+    assert x_axis_trace.z[0] == pytest.approx(0.0)
+
+def test_build_traces_solid_local_axis_follows_build123d_moved():
+    """
+    build123d's .moved() does populate the shape's placement Location
+    (unlike CadQuery's .translate(), which bakes the move into the
+    geometry) — the automatic triad must follow it.
+    """
+    moved_box = b3d.Box(5, 3, 2).moved(b3d.Location((6, 4, 0)))
+    traces, *_ = _build_traces([moved_box], None, None, 1.0, 0.1, None, None, axes_scale=1)
+    x_axis_trace = traces[1]
+    assert x_axis_trace.x[0] == pytest.approx(6.0)
+    assert x_axis_trace.y[0] == pytest.approx(4.0)
+    assert x_axis_trace.z[0] == pytest.approx(0.0)
+
+def test_build_traces_solid_local_axis_respects_visible_flag(box):
+    traces, *_ = _build_traces(
+        [box], None, None, 1.0, 0.1, None, None, local_axes_visible=True
+    )
+    assert all(t.visible is True for t in traces[1:4])
+
+    traces, *_ = _build_traces(
+        [box], None, None, 1.0, 0.1, None, None, local_axes_visible=False
+    )
+    assert all(t.visible is False for t in traces[1:4])
+
 def test_show_runs_with_location(cq_plane):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
         show([cq_plane], export=False)
@@ -522,16 +597,23 @@ def test_origin_toggle_restyles_world_axis_indices(box):
     assert on_button.method == "restyle"
     assert on_button.args[0] == {"visible": True}
 
-def test_local_axes_toggle_is_skip_when_no_locations(box):
+def test_local_axes_toggle_is_skip_when_nothing_to_toggle(straight_edge):
     """
     Plotly.restyle treats an *empty* trace-index list as "all traces",
-    not "no traces" — with no Location/Plane/Axis passed to show(),
-    restyling with [] would hide the geometry along with the (nonexistent)
-    axes. The button must use method="skip" instead in that case.
+    not "no traces" — with no solid and no explicit Location/Plane/Axis
+    passed to show(), restyling with [] would hide the geometry along with
+    the (nonexistent) axes. The button must use method="skip" instead.
     """
-    fig = _capture_fig(box)
+    fig = _capture_fig(straight_edge)
     for button in fig.layout.updatemenus[3].buttons:
         assert button.method == "skip"
+
+def test_local_axes_toggle_is_restyle_for_a_plain_solid(box):
+    """A solid gets its own automatic triad, with nothing else passed in."""
+    fig = _capture_fig(box)
+    for button in fig.layout.updatemenus[3].buttons:
+        assert button.method == "restyle"
+        assert button.args[1] != []
 
 def test_local_axes_toggle_is_restyle_when_locations_present(cq_plane):
     fig = _capture_fig([cq_plane])
