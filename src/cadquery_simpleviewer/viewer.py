@@ -1,6 +1,7 @@
 import plotly.graph_objects as go
 from .adapters import get_adapter
 from .plane import _base_plane
+from .axes import _world_axis_traces, _local_axis_traces
 from .exporter import resolve_export_config, export_step
 from .ifc_exporter import (
     resolve_ifc_export_config, resolve_ifc_config, export_ifc_proxy, _ifcopenshell_available,
@@ -113,7 +114,8 @@ def _axes_from_string(visible_axes):
 
 def _build_traces(objects, names, colors, opacity,
                   tessellation_tolerance, points_display, lines_display,
-                  angular_tolerance=0.1, flat_shading=False):
+                  angular_tolerance=0.1, flat_shading=False,
+                  axes_scale=1, local_axes_visible=True):
     """
     Build Plotly traces from a mixed list of CadQuery and/or build123d objects.
 
@@ -121,13 +123,16 @@ def _build_traces(objects, names, colors, opacity,
                                        → go.Mesh3d  (tessellated)
     Edge / Wire                       → go.Scatter3d (sampled lines)
     Vector / [x, y, z]                → go.Scatter3d (markers)
+    Location / Plane / Axis           → go.Scatter3d (dimmed RGB axis triad)
 
     Which library an object belongs to is resolved per-object via
     adapters.get_adapter(), so CadQuery and build123d objects can be
     freely mixed in the same call.
 
-    Returns (traces, all_x, all_y, all_z) where the coordinate lists span
-    all objects for bounding box computation.
+    Returns (traces, all_x, all_y, all_z, local_axis_trace_indices). The
+    last element lists the indices (within `traces`) of every local-axis
+    triad line, so the caller can wire up a single combined show/hide
+    toggle for all of them.
     """
     if not isinstance(objects, list):
         objects = [objects]
@@ -148,6 +153,7 @@ def _build_traces(objects, names, colors, opacity,
     all_y           = []
     all_z           = []
     mesh_color_index = 0
+    local_axis_trace_indices = []
 
     for index in range(len(objects)):
         obj  = objects[index]
@@ -159,8 +165,23 @@ def _build_traces(objects, names, colors, opacity,
         if adapter and adapter.is_pending_wire(obj):
             obj = adapter.extract_wire(obj)
 
+        # ── Location / Plane / Axis → dimmed RGB axis triad ─────────────────
+        if adapter and adapter.is_location(obj):
+            origin, x_tip, y_tip, z_tip = adapter.location_axes(obj, axes_scale)
+
+            for point in (origin, x_tip, y_tip, z_tip):
+                all_x.append(point[0])
+                all_y.append(point[1])
+                all_z.append(point[2])
+
+            start = len(traces)
+            traces.extend(_local_axis_traces(
+                origin, x_tip, y_tip, z_tip, visible=local_axes_visible
+            ))
+            local_axis_trace_indices.extend(range(start, len(traces)))
+
         # ── Edge ──────────────────────────────────────────────────────────
-        if adapter and adapter.is_edge(obj):
+        elif adapter and adapter.is_edge(obj):
             x, y, z = adapter.sample_edge(obj, samples)
 
             # Filter None values for bounding box
@@ -250,7 +271,7 @@ def _build_traces(objects, names, colors, opacity,
                 lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
             ))
 
-    return traces, all_x, all_y, all_z
+    return traces, all_x, all_y, all_z, local_axis_trace_indices
 
 
 # ── range helpers ─────────────────────────────────────────────────────────────
@@ -357,6 +378,44 @@ def _make_axis_toggle(label, scene_key, initial_visible, val_range, x_pos):
     )
 
 
+def _make_trace_toggle(label, indices, initial_visible, x_pos):
+    """
+    Build an on/off button pair that shows/hides a fixed set of trace
+    indices via restyle — unlike _make_axis_toggle (which relayouts a
+    scene axis), this toggles specific go.Scatter3d traces such as the
+    world-origin or local-axes triads.
+
+    `indices` may be empty (e.g. no Location/Plane objects were passed to
+    show()) — the button is still shown for a consistent header layout,
+    it just has nothing to restyle.
+    """
+    return dict(
+        type="buttons",
+        direction="right",
+        x=x_pos,
+        y=1.13,
+        xanchor="left",
+        yanchor="top",
+        showactive=True,
+        active=0 if initial_visible else 1,
+        bgcolor="white",
+        bordercolor="lightgray",
+        font=dict(size=11),
+        buttons=[
+            dict(
+                label=f"{label} ●",
+                method="restyle",
+                args=[{"visible": True}, indices]
+            ),
+            dict(
+                label=f"{label} ○",
+                method="restyle",
+                args=[{"visible": False}, indices]
+            ),
+        ]
+    )
+
+
 def _make_camera_menu(x_pos):
     """
     Build a two-option dropdown: Perspective and Orthographic.
@@ -455,6 +514,9 @@ def _build_figure(
     padding,
     points_display,
     lines_display,
+    axes_scale,
+    world_axes,
+    local_axes_visible,
 ):
     """
     Build a go.Figure from a mixed list of CadQuery and/or build123d objects.
@@ -467,10 +529,11 @@ def _build_figure(
     """
     show_x, show_y, show_z = _axes_from_string(visible_axes)
 
-    traces, all_x, all_y, all_z = _build_traces(
+    traces, all_x, all_y, all_z, local_axis_indices = _build_traces(
         objects, names, colors, opacity,
         tessellation_tolerance, points_display, lines_display,
-        angular_tolerance=angular_tolerance, flat_shading=flat_shading
+        angular_tolerance=angular_tolerance, flat_shading=flat_shading,
+        axes_scale=axes_scale, local_axes_visible=local_axes_visible,
     )
 
     if z is not None:
@@ -480,6 +543,16 @@ def _build_figure(
             opacity=plane_opacity,
             z=z
         ))
+        local_axis_indices = [i + 1 for i in local_axis_indices]
+
+    world_axis_start = len(traces)
+    traces.extend(_world_axis_traces(scale=axes_scale, visible=world_axes))
+    world_axis_indices = list(range(world_axis_start, len(traces)))
+
+    if world_axes:
+        all_x.extend([0.0, axes_scale])
+        all_y.extend([0.0, axes_scale])
+        all_z.extend([0.0, axes_scale])
 
     xmin, xmax = min(all_x), max(all_x)
     ymin, ymax = min(all_y), max(all_y)
@@ -494,16 +567,18 @@ def _build_figure(
             x_range, y_range, z_range, plane_size, z
         )
 
-    menu_x     = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
-    menu_y     = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.18)
-    menu_z     = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.36)
-    menu_cam   = _make_camera_menu(x_pos=0.56)
-    menu_reset = _make_reset_view_button(x_pos=0.75)
+    menu_x            = _make_axis_toggle("X", "xaxis", show_x, x_range, x_pos=0.00)
+    menu_y            = _make_axis_toggle("Y", "yaxis", show_y, y_range, x_pos=0.09)
+    menu_z            = _make_axis_toggle("Z", "zaxis", show_z, z_range, x_pos=0.18)
+    menu_local_axes   = _make_trace_toggle("Local Axes", local_axis_indices, local_axes_visible, x_pos=0.27)
+    menu_origin       = _make_trace_toggle("Origin", world_axis_indices, world_axes, x_pos=0.47)
+    menu_cam          = _make_camera_menu(x_pos=0.66)
+    menu_reset        = _make_reset_view_button(x_pos=0.85)
 
     annotations = [
         dict(text="Axes:", x=-0.01, y=1.17, xref="paper", yref="paper",
              showarrow=False, font=dict(size=11), xanchor="right"),
-        dict(text="Camera:", x=0.54,  y=1.17, xref="paper", yref="paper",
+        dict(text="Camera:", x=0.64,  y=1.17, xref="paper", yref="paper",
              showarrow=False, font=dict(size=11), xanchor="right"),
     ]
 
@@ -517,7 +592,11 @@ def _build_figure(
             zaxis=_axis_dict(show_z, z_range),
             camera=_DEFAULT_CAMERA
         ),
-        updatemenus=[menu_x, menu_y, menu_z, menu_cam, menu_reset],
+        updatemenus=[
+            menu_x, menu_y, menu_z,
+            menu_local_axes, menu_origin,
+            menu_cam, menu_reset,
+        ],
         annotations=annotations,
         legend=dict(x=0, y=1),
         margin=dict(l=0, r=0, t=90, b=0)
@@ -544,6 +623,9 @@ def show(
     padding=0.15,
     points_display=None,
     lines_display=None,
+    axes_scale=1,
+    world_axes=False,
+    local_axes_visible=True,
     export=None,
     export_ifc=None,
     ifc_config=None,
@@ -559,6 +641,11 @@ def show(
       - Edge / Wire                → sampled line (works with straight lines,
                                       arcs, ellipses, splines, helices, etc.)
       - Vector / [x, y, z]         → point marker
+      - Location / Plane / (build123d) Axis
+                                    → dimmed red/green/blue axis triad at
+                                      that location, e.g. show([part,
+                                      part.location]) — opt-in per object,
+                                      see `axes_scale`/`local_axes_visible`
 
     Equal scale is enforced: 1 unit in X occupies the same screen distance
     as 1 unit in Y or Z, in both perspective and orthographic modes.
@@ -603,6 +690,21 @@ def show(
                                           (default 50). Increase for tight curves,
                                           helices, or complex splines.
                                 opacity — line opacity (default 1.0)
+    axes_scale               : arm length of any RGB axis triads (world-origin
+                              and/or per-object) — see `world_axes` below and
+                              the Location/Plane object type accepted in
+                              `objects`. Default 1.
+    world_axes                : if True, a full-brightness red/green/blue
+                              triad is drawn at the global origin (0, 0, 0),
+                              visible from the start. Default False. A
+                              "Origin" button is always shown in the header
+                              to toggle it, regardless of this default.
+    local_axes_visible        : initial visibility of any per-object axis
+                              triads (see below). Only matters if `objects`
+                              contains at least one Location/Plane/Axis.
+                              Default True. A "Local Axes" button is always
+                              shown in the header to toggle all of them
+                              together.
     export                  : STEP export format config — on by default (an
                               "Export" dropdown+button row is shown above
                               the figure, offering "STEP" as a format;
@@ -648,6 +750,7 @@ def show(
         plane_color, plane_size, plane_opacity,
         tessellation_tolerance, angular_tolerance, flat_shading,
         padding, points_display, lines_display,
+        axes_scale, world_axes, local_axes_visible,
     )
 
     export_cfg = resolve_export_config(export)
@@ -670,8 +773,9 @@ def show(
         ))
 
     export_widget = build_export_widget(formats) if widgets is not None else None
+
+    fig.show()
+
     if export_widget is not None:
         enable_colab_custom_widget_manager()
         display(export_widget)
-
-    fig.show()

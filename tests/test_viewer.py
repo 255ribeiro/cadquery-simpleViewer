@@ -20,9 +20,11 @@ from cadquery_simpleviewer.adapters.cadquery_adapter import (
     is_point as _is_point,
     is_edge as _is_edge,
     is_wire as _is_wire,
+    is_location as _is_location,
     point_to_xyz as _point_to_xyz,
     sample_edge as _sample_edge,
     sample_wire as _sample_wire,
+    location_axes as _location_axes,
 )
 
 
@@ -120,6 +122,31 @@ def test_is_wire_with_workplane(box):
     assert _is_wire(box) == False
 
 
+# ── _is_location / _location_axes (cadquery adapter) ─────────────────────────
+
+def test_is_location_with_plane():
+    assert _is_location(cq.Plane(origin=(0, 0, 0))) == True
+
+def test_is_location_with_location():
+    assert _is_location(cq.Location((1, 2, 3))) == True
+
+def test_is_location_with_workplane(box):
+    assert _is_location(box) == False
+
+def test_location_axes_from_plane():
+    plane = cq.Plane(origin=(1, 2, 3), xDir=(1, 0, 0), normal=(0, 0, 1))
+    origin, x_tip, y_tip, z_tip = _location_axes(plane, scale=1)
+    assert origin == (1.0, 2.0, 3.0)
+    assert x_tip == (2.0, 2.0, 3.0)
+
+def test_location_axes_from_location():
+    loc = cq.Location((0, 0, 0))
+    origin, x_tip, y_tip, z_tip = _location_axes(loc, scale=1)
+    assert origin == (0.0, 0.0, 0.0)
+    assert x_tip == (1.0, 0.0, 0.0)
+    assert z_tip == (0.0, 0.0, 1.0)
+
+
 # ── _point_to_xyz (cadquery adapter) ────────────────────────────────────────────
 
 def test_point_to_xyz_vector():
@@ -206,7 +233,7 @@ def test_build_traces_custom_lines_display(straight_edge):
     assert traces[0].mode == "lines+markers"
 
 def test_build_traces_edge_contributes_to_bbox(straight_edge):
-    traces, all_x, all_y, all_z = _build_traces(
+    traces, all_x, all_y, all_z, _local_axis_indices = _build_traces(
         [straight_edge], None, None, 1.0, 0.1, None, None
     )
     assert max(all_x) >= 5.0
@@ -354,8 +381,8 @@ def test_equal_axis_ranges(box):
 
 # ── show — updatemenus ───────────────────────────────────────────────────────
 
-def test_five_updatemenus(box):
-    assert len(_capture_fig(box).layout.updatemenus) == 5
+def test_seven_updatemenus(box):
+    assert len(_capture_fig(box).layout.updatemenus) == 7
 
 def test_axis_menus_are_buttons(box):
     fig = _capture_fig(box)
@@ -363,13 +390,13 @@ def test_axis_menus_are_buttons(box):
         assert fig.layout.updatemenus[i].type == "buttons"
 
 def test_camera_is_dropdown(box):
-    assert _capture_fig(box).layout.updatemenus[3].type == "dropdown"
+    assert _capture_fig(box).layout.updatemenus[5].type == "dropdown"
 
 def test_camera_two_buttons(box):
-    assert len(_capture_fig(box).layout.updatemenus[3].buttons) == 2
+    assert len(_capture_fig(box).layout.updatemenus[5].buttons) == 2
 
 def test_camera_labels(box):
-    labels = [b.label for b in _capture_fig(box).layout.updatemenus[3].buttons]
+    labels = [b.label for b in _capture_fig(box).layout.updatemenus[5].buttons]
     assert "Perspective"  in labels
     assert "Orthographic" in labels
 
@@ -377,11 +404,11 @@ def test_camera_labels(box):
 # ── show — camera restores aspect ────────────────────────────────────────────
 
 def test_camera_buttons_restore_aspectmode(box):
-    for b in _capture_fig(box).layout.updatemenus[3].buttons:
+    for b in _capture_fig(box).layout.updatemenus[5].buttons:
         assert b.args[0].get("scene.aspectmode") == "manual"
 
 def test_camera_buttons_restore_aspectratio(box):
-    for b in _capture_fig(box).layout.updatemenus[3].buttons:
+    for b in _capture_fig(box).layout.updatemenus[5].buttons:
         ratio = b.args[0].get("scene.aspectratio", {})
         assert ratio.get("x") == 1
         assert ratio.get("y") == 1
@@ -391,23 +418,106 @@ def test_camera_buttons_restore_aspectratio(box):
 # ── show — reset view button ─────────────────────────────────────────────────
 
 def test_reset_view_is_button(box):
-    assert _capture_fig(box).layout.updatemenus[4].type == "buttons"
+    assert _capture_fig(box).layout.updatemenus[6].type == "buttons"
 
 def test_reset_view_label(box):
-    labels = [b.label for b in _capture_fig(box).layout.updatemenus[4].buttons]
+    labels = [b.label for b in _capture_fig(box).layout.updatemenus[6].buttons]
     assert "Reset View" in labels
 
 def test_reset_view_restores_default_camera(box):
-    button = _capture_fig(box).layout.updatemenus[4].buttons[0]
+    button = _capture_fig(box).layout.updatemenus[6].buttons[0]
     camera = button.args[0]["scene.camera"]
     assert camera["eye"] == {"x": 1.5, "y": 1.5, "z": 1.5}
     assert camera["projection"]["type"] == "perspective"
 
 def test_reset_view_restores_aspect(box):
-    button = _capture_fig(box).layout.updatemenus[4].buttons[0]
+    button = _capture_fig(box).layout.updatemenus[6].buttons[0]
     assert button.args[0]["scene.aspectmode"] == "manual"
     ratio = button.args[0]["scene.aspectratio"]
     assert ratio == {"x": 1, "y": 1, "z": 1}
+
+
+# ── show — axis triads (Location/Plane objects, world/local toggles) ────────
+
+@pytest.fixture
+def cq_plane():
+    return cq.Plane(origin=(1, 2, 3))
+
+
+@pytest.fixture
+def b3d_location():
+    return b3d.Location((4, 5, 6))
+
+
+def test_build_traces_location_produces_three_scatter3d(cq_plane):
+    traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
+    assert len(traces) == 3
+    assert all(isinstance(t, go.Scatter3d) for t in traces)
+
+def test_build_traces_location_colors_are_rgb(cq_plane):
+    traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
+    colors = [t.line.color for t in traces]
+    assert colors == ["red", "green", "blue"]
+
+def test_build_traces_location_dimmed_opacity(cq_plane):
+    traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
+    assert all(t.opacity < 1.0 for t in traces)
+
+def test_build_traces_location_reports_indices(cq_plane, straight_edge):
+    traces, all_x, all_y, all_z, local_axis_indices = _build_traces(
+        [straight_edge, cq_plane], None, None, 1.0, 0.1, None, None
+    )
+    assert local_axis_indices == [1, 2, 3]
+
+def test_build_traces_location_scale_applied(cq_plane):
+    traces, *_ = _build_traces(
+        [cq_plane], None, None, 1.0, 0.1, None, None, axes_scale=10
+    )
+    x_trace = traces[0]
+    assert x_trace.x[1] - x_trace.x[0] == 10
+
+def test_build_traces_build123d_location_supported(b3d_location):
+    traces, *_ = _build_traces([b3d_location], None, None, 1.0, 0.1, None, None)
+    assert len(traces) == 3
+    assert traces[0].x[0] == 4
+
+def test_show_runs_with_location(cq_plane):
+    with patch("cadquery_simpleviewer.viewer.go.Figure.show"):
+        show([cq_plane], export=False)
+
+
+def test_world_axis_traces_always_present(box):
+    fig = _capture_fig(box)
+    scatter_traces = [t for t in fig.data if isinstance(t, go.Scatter3d)]
+    world_traces = [t for t in scatter_traces if t.legendgroup == "world_axes"]
+    assert len(world_traces) == 3
+
+def test_world_axes_hidden_by_default(box):
+    fig = _capture_fig(box)
+    world_traces = [t for t in fig.data if getattr(t, "legendgroup", None) == "world_axes"]
+    assert all(t.visible is False for t in world_traces)
+
+def test_world_axes_visible_when_requested(box):
+    fig = _capture_fig(box, world_axes=True)
+    world_traces = [t for t in fig.data if getattr(t, "legendgroup", None) == "world_axes"]
+    assert all(t.visible in (True, None) for t in world_traces)
+
+def test_local_axes_menu_label(cq_plane):
+    fig = _capture_fig([cq_plane])
+    labels = [b.label for b in fig.layout.updatemenus[3].buttons]
+    assert any("Local Axes" in l for l in labels)
+
+def test_origin_menu_label(box):
+    fig = _capture_fig(box)
+    labels = [b.label for b in fig.layout.updatemenus[4].buttons]
+    assert any("Origin" in l for l in labels)
+
+def test_origin_toggle_restyles_world_axis_indices(box):
+    fig = _capture_fig(box)
+    on_button = fig.layout.updatemenus[4].buttons[0]
+    assert on_button.method == "restyle"
+    assert on_button.args[0] == {"visible": True}
+
 
 
 # ── show — axis visibility ───────────────────────────────────────────────────

@@ -38,6 +38,11 @@ def is_pending_wire(obj):
     return False
 
 
+def is_location(obj):
+    from build123d.geometry import Location, Plane, Axis
+    return isinstance(obj, (Location, Plane, Axis))
+
+
 def extract_wire(obj):
     raise NotImplementedError("build123d has no pending-wire concept")
 
@@ -89,6 +94,28 @@ def sample_wire(wire, samples):
             z.append(None)
 
     return x, y, z
+
+
+def location_axes(obj, scale):
+    """
+    Return (origin, x_tip, y_tip, z_tip) for a build123d Location, Plane,
+    or Axis — each an (x, y, z) tuple, with the tips scaled `scale` units
+    from the origin along that basis direction.
+
+    A Location/Axis is normalized to a Plane (Plane(location) is a
+    documented build123d constructor form) so the same origin/x_dir/y_dir/
+    z_dir attributes can be read regardless of which of the three was
+    passed in.
+    """
+    from build123d.geometry import Plane
+    plane = obj if isinstance(obj, Plane) else Plane(obj)
+
+    ox, oy, oz = plane.origin.X, plane.origin.Y, plane.origin.Z
+
+    def _tip(direction):
+        return (ox + scale * direction.X, oy + scale * direction.Y, oz + scale * direction.Z)
+
+    return (ox, oy, oz), _tip(plane.x_dir), _tip(plane.y_dir), _tip(plane.z_dir)
 
 
 def tessellate_solid(obj, tolerance, angular_tolerance=0.1):

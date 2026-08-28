@@ -41,6 +41,21 @@ def rect_wire():
     return b3d.Wire.make_rect(4.0, 2.0)
 
 
+@pytest.fixture
+def location():
+    return b3d.Location((1, 2, 3))
+
+
+@pytest.fixture
+def plane():
+    return b3d.Plane(origin=(0, 0, 0), z_dir=(0, 0, 1))
+
+
+@pytest.fixture
+def axis():
+    return b3d.Axis((1, 1, 1), (0, 0, 1))
+
+
 # ── is_point ────────────────────────────────────────────────────────────────
 
 def test_is_point_vector(vec):
@@ -109,6 +124,36 @@ def test_sample_wire_has_coordinates(rect_wire):
     x, y, z = adapter.sample_wire(rect_wire, 10)
     non_none = [v for v in x if v is not None]
     assert len(non_none) > 0
+
+
+# ── is_location / location_axes ──────────────────────────────────────────────
+
+def test_is_location_with_location(location):
+    assert adapter.is_location(location) == True
+
+def test_is_location_with_plane(plane):
+    assert adapter.is_location(plane) == True
+
+def test_is_location_with_axis(axis):
+    assert adapter.is_location(axis) == True
+
+def test_is_location_with_part(part):
+    assert adapter.is_location(part) == False
+
+def test_location_axes_origin(location):
+    origin, *_ = adapter.location_axes(location, scale=1)
+    assert origin == (1, 2, 3)
+
+def test_location_axes_scale(location):
+    origin, x_tip, y_tip, z_tip = adapter.location_axes(location, scale=5)
+    assert abs((x_tip[0] - origin[0]) ** 2 + (x_tip[1] - origin[1]) ** 2 + (x_tip[2] - origin[2]) ** 2 - 25) < 1e-6
+
+def test_location_axes_plane_identity(plane):
+    origin, x_tip, y_tip, z_tip = adapter.location_axes(plane, scale=1)
+    assert origin == (0, 0, 0)
+    assert x_tip == (1, 0, 0)
+    assert y_tip == (0, 1, 0)
+    assert z_tip == (0, 0, 1)
 
 
 # ── tessellate_solid ────────────────────────────────────────────────────────

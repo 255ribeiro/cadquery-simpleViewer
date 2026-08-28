@@ -43,6 +43,32 @@ def extract_wire(obj):
     return obj.wires().val()
 
 
+def is_location(obj):
+    import cadquery as cq
+    return isinstance(obj, (cq.occ_impl.geom.Location, cq.occ_impl.geom.Plane))
+
+
+def location_axes(obj, scale):
+    """
+    Return (origin, x_tip, y_tip, z_tip) for a cq.Location or cq.Plane —
+    each an (x, y, z) tuple, with the tips scaled `scale` units from the
+    origin along that basis direction.
+
+    A Location is normalized to a Plane via its `.plane` property so the
+    same origin/xDir/yDir/zDir attributes can be read regardless of which
+    of the two was passed in.
+    """
+    import cadquery as cq
+    plane = obj if isinstance(obj, cq.occ_impl.geom.Plane) else obj.plane
+
+    ox, oy, oz = plane.origin.x, plane.origin.y, plane.origin.z
+
+    def _tip(direction):
+        return (ox + scale * direction.x, oy + scale * direction.y, oz + scale * direction.z)
+
+    return (ox, oy, oz), _tip(plane.xDir), _tip(plane.yDir), _tip(plane.zDir)
+
+
 def point_to_xyz(obj):
     """Extract (x, y, z) from a cq.Vector."""
     return obj.x, obj.y, obj.z

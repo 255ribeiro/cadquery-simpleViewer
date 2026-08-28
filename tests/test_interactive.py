@@ -290,10 +290,10 @@ def _vbox_children(mock_display):
 
 
 def _export_widget_parts(mock_display):
-    """The export widget (HBox: Dropdown, Button, Output) is prepended as
-    the first child of the outer VBox whenever at least one export format
+    """The export widget (HBox: Dropdown, Button, Output) is appended as
+    the last child of the outer VBox whenever at least one export format
     is enabled."""
-    export_widget = _vbox_children(mock_display)[0]
+    export_widget = _vbox_children(mock_display)[-1]
     dropdown, button, status = export_widget.children
     return dropdown, button, status
 
@@ -345,7 +345,7 @@ def test_interactive_export_uses_current_slider_value(tmp_path, _no_display):
         return cq.Workplane("XY").box(width, 3, 2)
 
     vbox = _no_display.call_args[0][0]
-    slider = vbox.children[1].children[0]
+    slider = vbox.children[0].children[0]
     _dropdown, export_button, _status = _export_widget_parts(_no_display)
 
     slider.value = 8

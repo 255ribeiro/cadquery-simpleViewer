@@ -112,7 +112,8 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                           visible_axes, z, plane_color, plane_size,
                           plane_opacity, tessellation_tolerance,
                           angular_tolerance, flat_shading, padding,
-                          points_display, lines_display), plus "export",
+                          points_display, lines_display, axes_scale,
+                          world_axes, local_axes_visible), plus "export",
                           "export_ifc", and "ifc_config" (see show()'s
                           `export`, `export_ifc`, and `ifc_config`
                           parameters) — the export formats are offered
@@ -155,6 +156,7 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
         tessellation_tolerance=0.01, angular_tolerance=0.1,
         flat_shading=False, padding=0.15,
         points_display=None, lines_display=None,
+        axes_scale=1, world_axes=False, local_axes_visible=True,
     )
     figure_kwargs.update(show_kwargs)
 
@@ -218,6 +220,8 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
                 call_kwargs["angular_tolerance"],
                 call_kwargs["flat_shading"], call_kwargs["padding"],
                 call_kwargs["points_display"], call_kwargs["lines_display"],
+                call_kwargs["axes_scale"], call_kwargs["world_axes"],
+                call_kwargs["local_axes_visible"],
             )
             fig.update_layout(scene=dict(uirevision=_UIREVISION))
 
@@ -275,8 +279,8 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
 
         export_widget = build_export_widget(formats)
         vbox_children = (
-            ([export_widget] if export_widget is not None else [])
-            + [widgets.VBox(list(sliders.values())), plot_output, js_output]
+            [widgets.VBox(list(sliders.values())), plot_output, js_output]
+            + ([export_widget] if export_widget is not None else [])
         )
 
         enable_colab_custom_widget_manager()
