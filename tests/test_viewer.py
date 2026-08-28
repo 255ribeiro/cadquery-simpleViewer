@@ -1,3 +1,5 @@
+import math
+
 import ipywidgets as widgets
 import plotly.graph_objects as go
 import pytest
@@ -560,6 +562,46 @@ def test_build_traces_solid_local_axis_respects_visible_flag(box):
         [box], None, None, 1.0, 0.1, None, None, local_axes_visible=False
     )
     assert all(t.visible is False for t in traces[1:4])
+
+def test_build_traces_solid_local_axis_scale_normalized_to_solid_size(box):
+    """
+    box() is 5x3x2 (max span 5) — the arm length must be derived from that
+    span, not a flat axes_scale, so it always pokes out past the solid
+    regardless of how big or small it is.
+    """
+    traces, *_ = _build_traces([box], None, None, 1.0, 0.1, None, None, axes_scale=1)
+    x_axis_trace = traces[1]
+    # index 11 is the cylinder's top-cap *center* (see _cylinder_mesh in
+    # axes.py) — the true tip; the last vertex is a rim point, offset from
+    # the tip by the arm's radius, not the arm's own length.
+    tip = (x_axis_trace.x[11], x_axis_trace.y[11], x_axis_trace.z[11])
+    arm_length = math.dist((0, 0, 0), tip)
+    assert arm_length == pytest.approx(5 * 0.75)
+
+def test_build_traces_solid_local_axis_scale_is_a_multiplier(box):
+    """axes_scale still works as a multiplier on top of the normalized base."""
+    traces, *_ = _build_traces([box], None, None, 1.0, 0.1, None, None, axes_scale=2)
+    x_axis_trace = traces[1]
+    tip = (x_axis_trace.x[11], x_axis_trace.y[11], x_axis_trace.z[11])
+    arm_length = math.dist((0, 0, 0), tip)
+    assert arm_length == pytest.approx(5 * 0.75 * 2)
+
+def test_build_traces_solid_and_its_local_axis_share_legendgroup(box):
+    """
+    So that hiding the solid via its Plotly legend entry hides its
+    automatic axis triad along with it (see legend groupclick="togglegroup"
+    in _build_figure).
+    """
+    traces, *_ = _build_traces([box], None, None, 1.0, 0.1, None, None)
+    mesh_trace = traces[0]
+    axis_traces = traces[1:4]
+    assert mesh_trace.legendgroup is not None
+    assert all(t.legendgroup == mesh_trace.legendgroup for t in axis_traces)
+
+def test_build_traces_different_solids_get_different_legendgroups(box, cylinder):
+    traces, *_ = _build_traces([box, cylinder], None, None, 1.0, 0.1, None, None)
+    box_mesh, cylinder_mesh = traces[0], traces[4]
+    assert box_mesh.legendgroup != cylinder_mesh.legendgroup
 
 def test_show_runs_with_location(cq_plane):
     with patch("cadquery_simpleviewer.viewer.go.Figure.show"):

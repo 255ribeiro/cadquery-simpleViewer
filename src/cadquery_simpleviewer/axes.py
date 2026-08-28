@@ -140,14 +140,19 @@ def _world_axis_traces(scale, visible):
     )
 
 
-def _local_axis_traces(origin, x_tip, y_tip, z_tip, visible):
+def _local_axis_traces(origin, x_tip, y_tip, z_tip, visible, legendgroup="local_axes"):
     """
     One per-object triad, in lighter tints of the world triad's red/green/
     blue so the two are visually distinguishable — full opacity throughout
     (see `_axis_triad_traces`), rather than the previous opacity-based
     dimming, which could render invisibly.
+
+    `legendgroup` defaults to a single shared group for standalone
+    Location/Plane/Axis objects (no solid of their own to tie to), but the
+    automatic per-solid triad passes the solid's own mesh legendgroup
+    instead, so toggling that solid off in the legend hides its triad too.
     """
     return _axis_triad_traces(
         origin, x_tip, y_tip, z_tip,
-        colors=_LOCAL_AXIS_COLORS, legendgroup="local_axes", visible=visible,
+        colors=_LOCAL_AXIS_COLORS, legendgroup=legendgroup, visible=visible,
     )

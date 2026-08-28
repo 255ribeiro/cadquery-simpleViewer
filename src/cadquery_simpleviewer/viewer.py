@@ -212,6 +212,7 @@ def _build_traces(objects, names, colors, opacity,
                 opacity=l_style.get("opacity", 1.0),
                 name=name,
                 showlegend=True,
+                legendgroup=f"solid_{index}",
             ))
 
         # ── Wire ──────────────────────────────────────────────────────────
@@ -232,6 +233,7 @@ def _build_traces(objects, names, colors, opacity,
                 opacity=l_style.get("opacity", 1.0),
                 name=name,
                 showlegend=True,
+                legendgroup=f"solid_{index}",
             ))
 
         # ── Point ─────────────────────────────────────────────────────────
@@ -252,6 +254,7 @@ def _build_traces(objects, names, colors, opacity,
                 ),
                 name=name,
                 showlegend=True,
+                legendgroup=f"solid_{index}",
             ))
 
         # ── Solid ─────────────────────────────────────────────────────────
@@ -273,6 +276,8 @@ def _build_traces(objects, names, colors, opacity,
                 color = _DEFAULT_COLORS[mesh_color_index % len(_DEFAULT_COLORS)]
                 mesh_color_index += 1
 
+            mesh_legendgroup = f"solid_{index}"
+
             traces.append(go.Mesh3d(
                 x=x, y=y, z=z,
                 i=ii, j=jj, k=kk,
@@ -281,18 +286,27 @@ def _build_traces(objects, names, colors, opacity,
                 name=name,
                 flatshading=flat_shading,
                 showlegend=True,
+                legendgroup=mesh_legendgroup,
                 lighting=dict(ambient=0.4, diffuse=0.8, specular=0.2)
             ))
 
             # Triad at the solid's own placement Location — automatic, no
-            # Location/Plane/Axis needs to be passed in separately.
+            # Location/Plane/Axis needs to be passed in separately. Its arm
+            # length is normalized to the solid's own size (axes_scale as a
+            # multiplier on that, not a raw world-unit length), so it isn't
+            # left buried inside — or dwarfed by — solids of very different
+            # scales without the caller having to hand-tune axes_scale.
+            span = max(max(x) - min(x), max(y) - min(y), max(z) - min(z))
+            local_scale = axes_scale * (span * 0.75 if span > 0 else 1.0)
+
             origin, x_tip, y_tip, z_tip = adapter.location_axes(
-                adapter.object_location(obj), axes_scale
+                adapter.object_location(obj), local_scale
             )
 
             start = len(traces)
             traces.extend(_local_axis_traces(
-                origin, x_tip, y_tip, z_tip, visible=local_axes_visible
+                origin, x_tip, y_tip, z_tip,
+                visible=local_axes_visible, legendgroup=mesh_legendgroup,
             ))
             local_axis_trace_indices.extend(range(start, len(traces)))
 
@@ -640,7 +654,7 @@ def _build_figure(
             menu_cam, menu_reset,
         ],
         annotations=annotations,
-        legend=dict(x=0, y=1),
+        legend=dict(x=0, y=1, groupclick="togglegroup"),
         margin=dict(l=0, r=0, t=90, b=0)
     )
 
@@ -740,10 +754,16 @@ def show(
                                           (default 50). Increase for tight curves,
                                           helices, or complex splines.
                                 opacity — line opacity (default 1.0)
-    axes_scale               : arm length of any RGB axis triads (world-origin
-                              and/or per-object) — see `world_axes` below and
-                              the Location/Plane object type accepted in
-                              `objects`. Default 1.
+    axes_scale               : for the world-origin triad and any explicit
+                              Location/Plane/Axis object in `objects` (see
+                              `world_axes` below), an absolute arm length in
+                              world units. For each solid's *automatic*
+                              triad, instead a multiplier on a length
+                              already normalized to that solid's own size
+                              (0.75 * its largest bounding-box dimension) —
+                              so the default of 1 reliably pokes out past
+                              the solid regardless of scale, without
+                              needing to be hand-tuned per model. Default 1.
     world_axes                : if True, a full-brightness red/green/blue
                               triad is drawn at the global origin (0, 0, 0),
                               visible from the start. Default False. A
@@ -774,7 +794,11 @@ def show(
                               `objects` has no solids or explicit
                               Location/Plane/Axis to toggle. Same on-
                               reliable/off-unreliable caveat as
-                              `world_axes` above.
+                              `world_axes` above. A solid's automatic triad
+                              also shares its Plotly legend entry (and
+                              legend click hides/shows both together) — the
+                              standalone-Location triads don't, since they
+                              have no solid of their own to attach to.
     export                  : STEP export format config — on by default (an
                               "Export" dropdown+button row is shown above
                               the figure, offering "STEP" as a format;
