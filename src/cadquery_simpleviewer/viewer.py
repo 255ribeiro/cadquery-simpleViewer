@@ -123,7 +123,7 @@ def _build_traces(objects, names, colors, opacity,
                                        → go.Mesh3d  (tessellated)
     Edge / Wire                       → go.Scatter3d (sampled lines)
     Vector / [x, y, z]                → go.Scatter3d (markers)
-    Location / Plane / Axis           → go.Scatter3d (dimmed RGB axis triad)
+    Location / Plane / Axis           → go.Mesh3d (lighter-tint RGB axis triad)
 
     Which library an object belongs to is resolved per-object via
     adapters.get_adapter(), so CadQuery and build123d objects can be
@@ -165,7 +165,7 @@ def _build_traces(objects, names, colors, opacity,
         if adapter and adapter.is_pending_wire(obj):
             obj = adapter.extract_wire(obj)
 
-        # ── Location / Plane / Axis → dimmed RGB axis triad ─────────────────
+        # ── Location / Plane / Axis → lighter-tint RGB axis triad ───────────
         if adapter and adapter.is_location(obj):
             origin, x_tip, y_tip, z_tip = adapter.location_axes(obj, axes_scale)
 
@@ -647,8 +647,8 @@ def show(
                                       arcs, ellipses, splines, helices, etc.)
       - Vector / [x, y, z]         → point marker
       - Location / Plane / (build123d) Axis
-                                    → dimmed red/green/blue axis triad at
-                                      that location, e.g. show([part,
+                                    → light-tint red/green/blue axis triad
+                                      at that location, e.g. show([part,
                                       part.location]) — opt-in per object,
                                       see `axes_scale`/`local_axes_visible`
 

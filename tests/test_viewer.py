@@ -454,14 +454,19 @@ def test_build_traces_location_produces_three_mesh3d(cq_plane):
     assert len(traces) == 3
     assert all(isinstance(t, go.Mesh3d) for t in traces)
 
-def test_build_traces_location_colors_are_rgb(cq_plane):
+def test_build_traces_location_colors_are_distinct_light_rgb(cq_plane):
     traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
     colors = [t.color for t in traces]
-    assert colors == ["red", "green", "blue"]
+    assert colors != ["red", "green", "blue"]
+    assert len(set(colors)) == 3
 
-def test_build_traces_location_dimmed_opacity(cq_plane):
+def test_build_traces_location_full_opacity(cq_plane):
+    """
+    Opacity must stay at 1.0 — semi-transparent Mesh3d traces can silently
+    fail to render in some Plotly.js/WebGL renderers.
+    """
     traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
-    assert all(t.opacity < 1.0 for t in traces)
+    assert all(t.opacity == 1.0 for t in traces)
 
 def test_build_traces_location_reports_indices(cq_plane, straight_edge):
     traces, all_x, all_y, all_z, local_axis_indices = _build_traces(

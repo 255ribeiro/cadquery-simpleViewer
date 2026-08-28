@@ -40,17 +40,23 @@ def test_world_axis_traces_have_solid_geometry():
 
 # ── _local_axis_traces ───────────────────────────────────────────────────────
 
-def test_local_axis_traces_dimmed():
+def test_local_axis_traces_full_opacity():
+    """
+    Opacity must stay at 1.0 (not dimmed) — semi-transparent Mesh3d traces
+    can silently fail to render in some Plotly.js/WebGL renderers.
+    """
     traces = _local_axis_traces(
         (1, 1, 1), (2, 1, 1), (1, 2, 1), (1, 1, 2), visible=True
     )
-    assert all(t.opacity < 1.0 for t in traces)
+    assert all(t.opacity == 1.0 for t in traces)
 
-def test_local_axis_traces_colors():
+def test_local_axis_traces_colors_distinct_from_world():
     traces = _local_axis_traces(
         (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), visible=True
     )
-    assert [t.color for t in traces] == ["red", "green", "blue"]
+    colors = [t.color for t in traces]
+    assert colors != ["red", "green", "blue"]
+    assert len(set(colors)) == 3
 
 def test_local_axis_traces_origin_offset():
     traces = _local_axis_traces(

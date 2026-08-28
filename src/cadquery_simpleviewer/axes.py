@@ -3,6 +3,7 @@ import math
 import plotly.graph_objects as go
 
 _AXIS_COLORS = ("red", "green", "blue")
+_LOCAL_AXIS_COLORS = ("lightcoral", "lightgreen", "lightskyblue")
 
 # Arm radius as a fraction of arm length — keeps the cylinders "long in
 # height, small in radius" regardless of axes_scale.
@@ -94,15 +95,19 @@ def _cylinder_mesh(origin, tip, radius, segments=_CYLINDER_SEGMENTS):
     return xs, ys, zs, ii, jj, kk
 
 
-def _axis_triad_traces(origin, x_tip, y_tip, z_tip, opacity, legendgroup, visible):
+def _axis_triad_traces(origin, x_tip, y_tip, z_tip, colors, legendgroup, visible):
     """
-    Build 3 go.Mesh3d cylinder traces (X=red, Y=green, Z=blue) from origin
-    to each tip, tessellated the same way as any other solid.
+    Build 3 go.Mesh3d cylinder traces from origin to each tip, tessellated
+    the same way as any other solid, at full opacity — semi-transparent
+    Mesh3d traces are unreliable across Plotly.js/WebGL renderers (e.g.
+    VS Code's notebook renderer can silently fail to draw them at all,
+    regardless of the `visible` flag), the same class of bug that ruled
+    out thin Scatter3d lines for these triads in the first place.
     """
     tips = (x_tip, y_tip, z_tip)
     traces = []
 
-    for color, tip in zip(_AXIS_COLORS, tips):
+    for color, tip in zip(colors, tips):
         length = math.dist(origin, tip)
         radius = length * _RADIUS_RATIO
         x, y, z, i, j, k = _cylinder_mesh(origin, tip, radius)
@@ -111,7 +116,7 @@ def _axis_triad_traces(origin, x_tip, y_tip, z_tip, opacity, legendgroup, visibl
             x=x, y=y, z=z,
             i=i, j=j, k=k,
             color=color,
-            opacity=opacity,
+            opacity=1.0,
             flatshading=True,
             legendgroup=legendgroup,
             showlegend=False,
@@ -131,17 +136,18 @@ def _world_axis_traces(scale, visible):
 
     return _axis_triad_traces(
         origin, x_tip, y_tip, z_tip,
-        opacity=1.0, legendgroup="world_axes", visible=visible,
+        colors=_AXIS_COLORS, legendgroup="world_axes", visible=visible,
     )
 
 
-def _local_axis_traces(origin, x_tip, y_tip, z_tip, visible, opacity=0.45):
+def _local_axis_traces(origin, x_tip, y_tip, z_tip, visible):
     """
-    One per-object triad, dimmed (lower opacity) relative to the world
-    triad so the two are visually distinguishable while sharing the same
-    red/green/blue hues.
+    One per-object triad, in lighter tints of the world triad's red/green/
+    blue so the two are visually distinguishable — full opacity throughout
+    (see `_axis_triad_traces`), rather than the previous opacity-based
+    dimming, which could render invisibly.
     """
     return _axis_triad_traces(
         origin, x_tip, y_tip, z_tip,
-        opacity=opacity, legendgroup="local_axes", visible=visible,
+        colors=_LOCAL_AXIS_COLORS, legendgroup="local_axes", visible=visible,
     )
