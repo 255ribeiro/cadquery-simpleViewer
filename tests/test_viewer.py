@@ -449,14 +449,14 @@ def b3d_location():
     return b3d.Location((4, 5, 6))
 
 
-def test_build_traces_location_produces_three_scatter3d(cq_plane):
+def test_build_traces_location_produces_three_mesh3d(cq_plane):
     traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
     assert len(traces) == 3
-    assert all(isinstance(t, go.Scatter3d) for t in traces)
+    assert all(isinstance(t, go.Mesh3d) for t in traces)
 
 def test_build_traces_location_colors_are_rgb(cq_plane):
     traces, *_ = _build_traces([cq_plane], None, None, 1.0, 0.1, None, None)
-    colors = [t.line.color for t in traces]
+    colors = [t.color for t in traces]
     assert colors == ["red", "green", "blue"]
 
 def test_build_traces_location_dimmed_opacity(cq_plane):
@@ -474,7 +474,7 @@ def test_build_traces_location_scale_applied(cq_plane):
         [cq_plane], None, None, 1.0, 0.1, None, None, axes_scale=10
     )
     x_trace = traces[0]
-    assert x_trace.x[1] - x_trace.x[0] == 10
+    assert max(x_trace.x) - x_trace.x[0] == 10
 
 def test_build_traces_build123d_location_supported(b3d_location):
     traces, *_ = _build_traces([b3d_location], None, None, 1.0, 0.1, None, None)
@@ -488,8 +488,7 @@ def test_show_runs_with_location(cq_plane):
 
 def test_world_axis_traces_always_present(box):
     fig = _capture_fig(box)
-    scatter_traces = [t for t in fig.data if isinstance(t, go.Scatter3d)]
-    world_traces = [t for t in scatter_traces if t.legendgroup == "world_axes"]
+    world_traces = [t for t in fig.data if getattr(t, "legendgroup", None) == "world_axes"]
     assert len(world_traces) == 3
 
 def test_world_axes_hidden_by_default(box):

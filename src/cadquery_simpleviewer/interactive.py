@@ -156,7 +156,7 @@ def interactive(*, show_kwargs=None, continuous_update=False, **controls):
         tessellation_tolerance=0.01, angular_tolerance=0.1,
         flat_shading=False, padding=0.15,
         points_display=None, lines_display=None,
-        axes_scale=1, world_axes=False, local_axes_visible=True,
+        axes_scale=1, world_axes=False, local_axes_visible=False,
     )
     figure_kwargs.update(show_kwargs)
 

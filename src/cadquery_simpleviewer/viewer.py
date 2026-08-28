@@ -115,7 +115,7 @@ def _axes_from_string(visible_axes):
 def _build_traces(objects, names, colors, opacity,
                   tessellation_tolerance, points_display, lines_display,
                   angular_tolerance=0.1, flat_shading=False,
-                  axes_scale=1, local_axes_visible=True):
+                  axes_scale=1, local_axes_visible=False):
     """
     Build Plotly traces from a mixed list of CadQuery and/or build123d objects.
 
@@ -630,7 +630,7 @@ def show(
     lines_display=None,
     axes_scale=1,
     world_axes=False,
-    local_axes_visible=True,
+    local_axes_visible=False,
     export=None,
     export_ifc=None,
     ifc_config=None,
@@ -703,13 +703,20 @@ def show(
                               triad is drawn at the global origin (0, 0, 0),
                               visible from the start. Default False. A
                               "Origin" button is always shown in the header
-                              to toggle it, regardless of this default.
+                              to toggle it, regardless of this default —
+                              turning it on works reliably; turning an
+                              already-shown triad back off may not update
+                              the view in every browser, a known Plotly
+                              gl3d limitation with dynamically hiding
+                              Mesh3d traces. Default to False and only
+                              switch it on when you need it.
     local_axes_visible        : initial visibility of any per-object axis
                               triads (see below). Only matters if `objects`
                               contains at least one Location/Plane/Axis.
-                              Default True. A "Local Axes" button is always
-                              shown in the header to toggle all of them
-                              together.
+                              Default False. A "Local Axes" button is
+                              always shown in the header to toggle all of
+                              them together — same on-reliable/off-unreliable
+                              caveat as `world_axes` above.
     export                  : STEP export format config — on by default (an
                               "Export" dropdown+button row is shown above
                               the figure, offering "STEP" as a format;
