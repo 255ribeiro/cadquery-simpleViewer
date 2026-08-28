@@ -518,6 +518,23 @@ def test_origin_toggle_restyles_world_axis_indices(box):
     assert on_button.method == "restyle"
     assert on_button.args[0] == {"visible": True}
 
+def test_local_axes_toggle_is_skip_when_no_locations(box):
+    """
+    Plotly.restyle treats an *empty* trace-index list as "all traces",
+    not "no traces" — with no Location/Plane/Axis passed to show(),
+    restyling with [] would hide the geometry along with the (nonexistent)
+    axes. The button must use method="skip" instead in that case.
+    """
+    fig = _capture_fig(box)
+    for button in fig.layout.updatemenus[3].buttons:
+        assert button.method == "skip"
+
+def test_local_axes_toggle_is_restyle_when_locations_present(cq_plane):
+    fig = _capture_fig([cq_plane])
+    for button in fig.layout.updatemenus[3].buttons:
+        assert button.method == "restyle"
+        assert button.args[1] != []
+
 
 
 # ── show — axis visibility ───────────────────────────────────────────────────

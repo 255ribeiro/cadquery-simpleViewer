@@ -386,9 +386,14 @@ def _make_trace_toggle(label, indices, initial_visible, x_pos):
     world-origin or local-axes triads.
 
     `indices` may be empty (e.g. no Location/Plane objects were passed to
-    show()) — the button is still shown for a consistent header layout,
-    it just has nothing to restyle.
+    show()) — the button is still shown for a consistent header layout.
+    Plotly.restyle treats an *empty* trace-index list as "all traces"
+    rather than "no traces", so restyling with `[]` would wipe the whole
+    figure (geometry included) instead of doing nothing — method="skip"
+    is Plotly's real no-op, used here whenever there's nothing to toggle.
     """
+    method = "restyle" if indices else "skip"
+
     return dict(
         type="buttons",
         direction="right",
@@ -404,12 +409,12 @@ def _make_trace_toggle(label, indices, initial_visible, x_pos):
         buttons=[
             dict(
                 label=f"{label} ●",
-                method="restyle",
+                method=method,
                 args=[{"visible": True}, indices]
             ),
             dict(
                 label=f"{label} ○",
-                method="restyle",
+                method=method,
                 args=[{"visible": False}, indices]
             ),
         ]
